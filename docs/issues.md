@@ -249,7 +249,7 @@ Review repeated at `094c84b` on 2026-09-18. These issues remain open.
     local macOS paths. Re-verify by running `ctest -R test9000` in CI (which
     now generates fresh certs) or on a host with local docker.
 
-- [ ] **14. QUIC read failures are classified without `SSL_get_error()`**
+- [x] **14. QUIC read failures are classified without `SSL_get_error()`**
   - `src/SSLSocket.c:951-972, 1010-1033`
   - OpenSSL requires `SSL_get_error()` for every `SSL_read()` result `<= 0`.
     The new zero-result path instead checks only connection-close information,
@@ -258,6 +258,14 @@ Review repeated at `094c84b` on 2026-09-18. These issues remain open.
     indefinitely.
   - Fix: preserve the exact `SSL_read()` result, classify it with
     `SSL_get_error()`, and retry only `SSL_ERROR_WANT_READ`/`WANT_WRITE`.
+  - **Fixed 2026-09-18**: the rc==0 branches of `SSLSocket_getch`/`getdata` now
+    classify via `SSL_get_error()` (through `SSLSocket_error`) — ZERO_RETURN
+    (TLS orderly shutdown, QUIC connection close, QUIC stream FIN) and SYSCALL
+    map to `SOCKET_ERROR`; only WANT_READ/WANT_WRITE retry. This removes the
+    read-path need for `SSLSocket_quic_closed_state()` entirely (it remains
+    only in `putdatas`, which is #18's scope). Verified: QUIC/TLS/WSS smokes,
+    TLS orderly-shutdown regression (fast failure callback), full test9000
+    QUIC suite (#2/6/8/9/10/14) all pass.
 
 ### P1 — should fix before merge
 

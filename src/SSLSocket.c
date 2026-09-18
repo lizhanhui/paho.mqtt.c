@@ -964,17 +964,19 @@ int SSLSocket_getch(SSL* ssl, SOCKET socket, char* c)
 			SocketBuffer_interrupted(socket, 0);
 		}
 	}
-	else if (rc == 0) 	/* A return value of 0 means the peer has performed an orderly shutdown. */
+	else if (rc == 0)
 	{
-#if defined(WITH_OPENSSL_QUIC)
-		/* for a QUIC connection that is still open, SSL_read can return 0 when no
-		   stream data is available yet - treat as interrupted and retry.
-		   For non-QUIC (TLS) connections, and closed QUIC connections, this is an
-		   orderly shutdown, so report SOCKET_ERROR as before. */
-		if (SSLSocket_quic_closed_state(ssl) == 0)
+		/* Per OpenSSL, a zero SSL_read() result must be classified with
+		   SSL_get_error(): ZERO_RETURN covers orderly TLS shutdown as well as
+		   QUIC connection close and QUIC stream FIN; SYSCALL and others are
+		   fatal.  Only WANT_READ/WANT_WRITE may be retried. */
+		int err = SSLSocket_error("SSL_read - getch", ssl, socket, rc, NULL, NULL);
+		if (err == SSL_ERROR_WANT_READ || err == SSL_ERROR_WANT_WRITE)
+		{
 			rc = TCPSOCKET_INTERRUPTED;
+			SocketBuffer_interrupted(socket, 0);
+		}
 		else
-#endif
 			rc = SOCKET_ERROR;
 	}
 	else if (rc == 1)
@@ -1023,16 +1025,16 @@ char *SSLSocket_getdata(SSL* ssl, SOCKET socket, size_t bytes, size_t* actual_le
 				goto exit;
 			}
 		}
-		else if (*rc == 0) /* rc 0 means the other end closed the socket */
+		else if (*rc == 0)
 		{
-#if defined(WITH_OPENSSL_QUIC)
-			/* as in SSLSocket_getch, only retry for a QUIC connection that is
-			   still open; non-QUIC (TLS) connections and closed QUIC connections
-			   mean the socket is closed */
-			if (SSLSocket_quic_closed_state(ssl) == 0)
+			/* as in SSLSocket_getch, classify a zero SSL_read() result with
+			   SSL_get_error(): only WANT_READ/WANT_WRITE may be retried;
+			   ZERO_RETURN (orderly TLS shutdown, QUIC connection close or
+			   stream FIN) and SYSCALL mean the socket is closed */
+			int err = SSLSocket_error("SSL_read - getdata", ssl, socket, *rc, NULL, NULL);
+			if (err == SSL_ERROR_WANT_READ || err == SSL_ERROR_WANT_WRITE)
 				*rc = TCPSOCKET_INTERRUPTED;
 			else
-#endif
 			{
 				buf = NULL;
 				goto exit;
