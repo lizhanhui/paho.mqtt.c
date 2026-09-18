@@ -72,11 +72,23 @@ Status legend: [ ] open, [x] fixed
     fails fast (~1s, `TCP/TLS connect failure`), test9000 #13 negative
     handshake test passes.
 
-- [ ] **5. `MQTT_SSL_VERSION_TLS_1_3` (=4) exposed but not implemented**
+- [x] **5. `MQTT_SSL_VERSION_TLS_1_3` (=4) exposed but not implemented**
   - `src/MQTTClient.h:664`
-  - No switch case in `SSLSocket_createContext`; selecting it leaves `net->ctx`
-    NULL and every connect fails.
+  - No switch case in `SSLSocket_createContext`. Correction to the original
+    failure-mode note: the version `switch` only applies to OpenSSL < 1.1.0;
+    on modern OpenSSL `sslVersion` is silently ignored (TLS_client_method
+    always), so selecting 1.3 was a no-op rather than a connect failure —
+    and no way to *restrict* to TLS 1.3 existed.
   - Fix: implement (TLS_client_method + min/max proto version) or remove the constant.
+  - **Fixed 2026-09-18** (option B from discussion): in the OpenSSL >= 1.1.0
+    branch, when `sslVersion == MQTT_SSL_VERSION_TLS_1_3` the context is
+    restricted via `SSL_CTX_set_min/max_proto_version(TLS1_3_VERSION)`;
+    `TLS1_3_VERSION` undefined (OpenSSL 1.1.0 / old LibreSSL) → clean error
+    instead of silent downgrade; legacy branch logs "requires OpenSSL 1.1.1+".
+    Other version values remain ignored on modern OpenSSL (pre-existing
+    quirk, out of scope). Verified: TLS 1.3-restricted connect to TDMQ
+    passes (broker does 1.3), default connect passes, TLS 1.3-only client vs
+    TLS 1.2-only local server fails fast (0.35s).
 
 - [ ] **6. `QUIC_MODE_PREFERRED` promises TCP fallback that does not exist**
   - `src/Clients.h:79-88`, `src/MQTTProtocolOut.c:270-278`

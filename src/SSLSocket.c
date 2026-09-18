@@ -566,6 +566,23 @@ int SSLSocket_createContext(networkHandles* net, MQTTClient_SSLOptions* opts)
 	{
 #if (OPENSSL_VERSION_NUMBER >= 0x10100000L)
 		net->ctx = SSL_CTX_new(TLS_client_method());
+		if (net->ctx != NULL && opts->struct_version >= 1 && opts->sslVersion == MQTT_SSL_VERSION_TLS_1_3)
+		{
+#if defined(TLS1_3_VERSION)
+			/* restrict the context to TLS 1.3 only */
+			if (SSL_CTX_set_min_proto_version(net->ctx, TLS1_3_VERSION) != 1 ||
+					SSL_CTX_set_max_proto_version(net->ctx, TLS1_3_VERSION) != 1)
+			{
+				Log(TRACE_MINIMUM, -1, "Could not restrict SSL context to TLS 1.3");
+				SSL_CTX_free(net->ctx);
+				net->ctx = NULL;
+			}
+#else
+			Log(TRACE_MINIMUM, -1, "TLS 1.3 is not supported by this TLS library version");
+			SSL_CTX_free(net->ctx);
+			net->ctx = NULL;
+#endif
+		}
 #else
 		int sslVersion = MQTT_SSL_VERSION_DEFAULT;
 		if (opts->struct_version >= 1) sslVersion = opts->sslVersion;
@@ -599,6 +616,9 @@ int SSLSocket_createContext(networkHandles* net, MQTTClient_SSLOptions* opts)
 			net->ctx = SSL_CTX_new(OSSL_QUIC_client_thread_method());
 			break;
 #endif
+		case MQTT_SSL_VERSION_TLS_1_3:
+			Log(TRACE_MINIMUM, -1, "TLS 1.3 requires OpenSSL 1.1.1 or later");
+			break;
 		default:
 			break;
 		}
