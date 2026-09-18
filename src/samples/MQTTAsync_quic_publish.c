@@ -153,6 +153,8 @@ int main(int argc, char* argv[])
 	int rc;
 
     const char* uri = (argc > 1) ? argv[1] : ADDRESS;
+    const char* username = (argc > 2) ? argv[2] : NULL;
+    const char* password = (argc > 3) ? argv[3] : NULL;
 
 
 	if ((rc = MQTTAsync_create(&client, uri, CLIENTID, MQTTCLIENT_PERSISTENCE_NONE, NULL)) != MQTTASYNC_SUCCESS)
@@ -169,6 +171,8 @@ int main(int argc, char* argv[])
 
 	conn_opts.keepAliveInterval = 20;
 	conn_opts.cleansession = 1;
+	conn_opts.username = username;
+	conn_opts.password = password;
 	conn_opts.onSuccess = onConnect;
 	conn_opts.onFailure = onConnectFailure;
 	conn_opts.httpProxy = NULL;
