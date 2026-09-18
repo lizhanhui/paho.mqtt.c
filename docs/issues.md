@@ -269,13 +269,18 @@ Review repeated at `094c84b` on 2026-09-18. These issues remain open.
 
 ### P1 — should fix before merge
 
-- [ ] **15. Transport state leaks between `serverURIs` attempts**
+- [x] **15. Transport state leaks between `serverURIs` attempts**
   - `src/MQTTAsyncUtils.c:1320-1367`
   - `ssl`, `websocket`, and `unixsock` are set for a URI but not reset before
     parsing the next one. In particular, the documented `quic://` to `tcp://`
     fallback leaves `ssl == 2` and opens UDP again instead of TCP.
   - Fix: reset all per-URI transport flags before parsing each URI, then derive
     them exclusively from the current scheme.
+  - **Fixed 2026-09-18**: `ssl`/`websocket`/`unixsock` are reset to 0 before
+    parsing each serverURI in `MQTTAsync_processCommand`. Note this also fixes
+    the pre-existing `ssl://`→`tcp://` leak (ssl stayed 1). Verified:
+    quic://(dead)→tcp:// fallback connects via TCP (~13s), quic://(dead)→ssl://
+    regression passes, QUIC smoke passes (single-URI path unaffected).
 
 - [x] **16. Continued QUIC handshakes use the unparsed URI**
   - `src/MQTTAsyncUtils.c:2875-2911`

@@ -1321,6 +1321,13 @@ static int MQTTAsync_processCommand(void)
 				{
 					serverURI = command->client->serverURIs[command->command.details.conn.currentURI];
 
+					/* reset per-URI transport flags before parsing the scheme -
+					   they must reflect the current URI, not a previous one
+					   (e.g. quic:// -> tcp:// failover must not keep ssl == 2) */
+					command->client->ssl = 0;
+					command->client->websocket = 0;
+					command->client->unixsock = 0;
+
 					if (strncmp(URI_TCP, serverURI, strlen(URI_TCP)) == 0)
 						serverURI += strlen(URI_TCP);
 					else if (strncmp(URI_MQTT, serverURI, strlen(URI_MQTT)) == 0)
