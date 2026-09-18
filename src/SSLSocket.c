@@ -832,7 +832,11 @@ int SSLSocket_connect(SSL* ssl, SOCKET sock, const char* hostname, int verify, i
 				Socket_addPendingWrite(sock);
 				break;
 			default:
-				rc = error;
+				/* Any other error is fatal for the connect attempt.  Return SSL_FATAL
+				   (negative) rather than the raw SSL_ERROR_* code, because callers
+				   only treat 1 as success and negative values as failure - positive
+				   codes could fall through and be mistaken for success. */
+				rc = SSL_FATAL;
 				Socket_clearPendingWrite(sock);
 				break;
 			}

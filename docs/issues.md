@@ -56,13 +56,21 @@ Status legend: [ ] open, [x] fixed
 
 ## P1 — should fix
 
-- [ ] **4. `SSLSocket_connect` default branch returns raw `SSL_ERROR_*` codes**
+- [x] **4. `SSLSocket_connect` default branch returns raw `SSL_ERROR_*` codes**
   - `src/SSLSocket.c:834-837` (callers: `src/MQTTProtocolOut.c:318-326`)
   - `rc = error` yields positive codes (e.g. `SSL_ERROR_ZERO_RETURN`=6). Callers
     only handle `sslrc == 1` (success) and `sslrc < 0` (failure); a positive non-1
     code falls through with rc==0 from the TCP connect, proceeding as if the
     handshake succeeded and failing later with a misleading error.
   - Fix: audit callers, map all positive codes to failure.
+  - **Fixed 2026-09-18**: default branch now returns `SSL_FATAL` (-3) instead of
+    the raw error, restoring the documented contract (1 = success,
+    `TCPSOCKET_INTERRUPTED` = retry, anything else = failure). This matches
+    historical behavior (negative = failure) and all 11 call sites in
+    `MQTTClient.c`/`MQTTAsyncUtils.c`/`MQTTProtocolOut.c` handle it correctly.
+    Verified: QUIC/TLS smokes pass, TLS-to-non-TLS-server handshake failure
+    fails fast (~1s, `TCP/TLS connect failure`), test9000 #13 negative
+    handshake test passes.
 
 - [ ] **5. `MQTT_SSL_VERSION_TLS_1_3` (=4) exposed but not implemented**
   - `src/MQTTClient.h:664`
