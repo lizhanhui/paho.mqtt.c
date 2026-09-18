@@ -118,10 +118,13 @@ Status legend: [ ] open, [x] fixed
 
 ## P2 — cleanup
 
-- [ ] **7. TRACE_MIN log spam in command loop**
+- [x] **7. TRACE_MIN log spam in command loop**
   - `src/MQTTAsyncUtils.c:1403-1406`
   - "Connect state is NOT_IN_PROGRESS" logged per processed command at TRACE_MIN.
   - Fix: remove or demote to TRACE_MED.
+  - **Fixed 2026-09-18**: demoted to TRACE_MED (kept the message — it is on an
+    error path and useful for debugging, just not at minimum level).
+    Verified: build clean, QUIC smoke passes.
 
 - [ ] **8. UDP socket gets TCP hints and TCP-only setsockopts**
   - `src/Socket.c:1398-1401, 1496-1510`

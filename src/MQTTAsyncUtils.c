@@ -1401,7 +1401,7 @@ static int MQTTAsync_processCommand(void)
 #endif
 
 			if (command->client->c->connect_state == NOT_IN_PROGRESS) {
-				Log(TRACE_MIN, -1, "Connect state is NOT_IN_PROGRESS for client %s", command->client->c->clientID);
+				Log(TRACE_MED, -1, "Connect state is NOT_IN_PROGRESS for client %s", command->client->c->clientID);
 				rc = SOCKET_ERROR;
 			}
 
