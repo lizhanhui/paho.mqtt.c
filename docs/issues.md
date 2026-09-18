@@ -212,13 +212,20 @@ Review repeated at `094c84b` on 2026-09-18. These issues remain open.
     completes in ~13s (was ~61s) with `connectTimeout=10` effective; full
     test9000 QUIC suite, smokes, and fallback sample all pass.
 
-- [ ] **12. No-SSL sample builds are broken**
+- [x] **12. No-SSL sample builds are broken**
   - `src/samples/CMakeLists.txt:58-94`
   - Existing TCP samples now link to `paho-mqtt3as`/`paho-mqtt3cs`, and QUIC
     samples are created unconditionally. With `PAHO_BUILD_SAMPLES=ON` and
     `PAHO_WITH_SSL=OFF`, linking fails because the SSL targets do not exist.
   - Fix: retain the non-SSL libraries for ordinary samples and add/install QUIC
     samples only when effective QUIC support is enabled.
+  - **Fixed 2026-09-18**: plain `MQTTAsync_*`/`MQTTClient_*` samples again link
+    the non-SSL `paho-mqtt3a`/`paho-mqtt3c` (restoring upstream behavior); the
+    three QUIC samples are created/linked (`paho-mqtt3as`)/installed only under
+    `PAHO_WITH_SSL`. (Refining the gate to *effective* QUIC capability is #19's
+    scope.) Verified: `PAHO_WITH_SSL=OFF` + `PAHO_BUILD_SAMPLES=ON` builds all
+    plain samples with zero QUIC targets; SSL build still builds all three QUIC
+    samples; quic publish sample passes against TDMQ.
 
 - [ ] **13. Bundled QUIC test certificates are expired**
   - `test/ssl/emqx/etc/certs/cert.pem`
