@@ -1113,8 +1113,8 @@ typedef struct
     int enableServerCertAuth;
 
     /** The SSL/TLS version to use. Specify one of MQTT_SSL_VERSION_DEFAULT (0),
-    * MQTT_SSL_VERSION_TLS_1_0 (1), MQTT_SSL_VERSION_TLS_1_1 (2) or MQTT_SSL_VERSION_TLS_1_2 (3).
-    * Only used if struct_version is >= 1.
+    * MQTT_SSL_VERSION_TLS_1_0 (1), MQTT_SSL_VERSION_TLS_1_1 (2), MQTT_SSL_VERSION_TLS_1_2 (3)
+    * or MQTT_SSL_VERSION_TLS_1_3 (4). Only used if struct_version is >= 1.
     */
     int sslVersion;
 
