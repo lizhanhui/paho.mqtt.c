@@ -79,6 +79,7 @@ The "quic://" schema specifies MQTT over QUIC, which is always secured with TLS 
 - **MQTTAsync only** — QUIC connections are supported by the asynchronous library (`paho-mqtt3as`, MQTTAsync API). The synchronous MQTTClient library does not support `quic://` URIs.
 - **ALPN** — the client negotiates the `mqtt` ALPN protocol, as required for MQTT over QUIC.
 - **Default stream mode** — all MQTT traffic uses a single client-initiated bidirectional stream (OpenSSL default stream mode), which matches MQTT's requirement for one ordered byte stream per connection. Multi-stream mode is not used.
+- **No automatic TCP fallback** — if UDP is blocked (common on corporate networks), a `quic://` connection attempt fails by timeout rather than falling back to TCP. For fallback, configure `serverURIs` with a `quic://` URI first and an `ssl://` (or `tcp://`) URI second; the client tries them in order, e.g. `{"quic://broker:14567", "ssl://broker:8883"}`.
 - **Server certificate verification** — as with SSL/TLS connections, `ssl_options` should be supplied in the connect options (e.g. `trustStore` and `enableServerCertAuth` to verify the broker certificate).
 
 ## Runtime tracing

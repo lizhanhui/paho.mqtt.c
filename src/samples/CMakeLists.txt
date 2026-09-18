@@ -64,6 +64,7 @@ if(PAHO_BUILD_SHARED)
     MQTTClient_publish_async
     MQTTAsync_quic_publish
     MQTTAsync_quic_subscribe
+    MQTTAsync_quic_fallback
   )
     add_executable(${TARGET} ${TARGET}.c)
     set_target_properties(${TARGET} PROPERTIES
@@ -71,7 +72,7 @@ if(PAHO_BUILD_SHARED)
   )
   endforeach()
 
-  foreach(TARGET MQTTAsync_subscribe MQTTAsync_publish MQTTAsync_publish_time MQTTAsync_quic_publish MQTTAsync_quic_subscribe)
+  foreach(TARGET MQTTAsync_subscribe MQTTAsync_publish MQTTAsync_publish_time MQTTAsync_quic_publish MQTTAsync_quic_subscribe MQTTAsync_quic_fallback)
     target_link_libraries(${TARGET} paho-mqtt3as)
   endforeach()
 
@@ -89,6 +90,7 @@ if(PAHO_BUILD_SHARED)
       MQTTClient_publish_async
       MQTTAsync_quic_publish
       MQTTAsync_quic_subscribe
+      MQTTAsync_quic_fallback
 
     RUNTIME DESTINATION ${CMAKE_INSTALL_BINDIR}
     LIBRARY DESTINATION ${CMAKE_INSTALL_LIBDIR}

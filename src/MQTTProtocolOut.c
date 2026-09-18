@@ -144,6 +144,12 @@ int MQTTProtocol_connect(const char* address, Clients* aClient, int unixsock, in
 	FUNC_ENTRY;
 	aClient->good = 1;
 
+#if defined(OPENSSL) && defined(WITH_OPENSSL_QUIC)
+	/* reset per connect attempt - networkHandles persist across serverURIs failovers,
+	   and a stale QUIC_MODE_ONLY would create a QUIC context for a TLS connection */
+	aClient->net.quic_mode = QUIC_MODE_NONE;
+#endif
+
 	if (!unixsock)
 	{
 		if (aClient->httpProxy)
@@ -270,7 +276,7 @@ int MQTTProtocol_connect(const char* address, Clients* aClient, int unixsock, in
 #if defined(OPENSSL) && defined(WITH_OPENSSL_QUIC)
 	else if (ssl == 2) {
 		addr_len = MQTTProtocol_addressPort(address, &port, NULL, MQTT_DEFAULT_PORT);
-		aClient->net.quic_mode = QUIC_MODE_PREFERRED;
+		aClient->net.quic_mode = QUIC_MODE_ONLY;
 #if defined(__GNUC__) && defined(__linux__)
 		rc = Socket_dgram_new(address, addr_len, port, &(aClient->net.socket), timeout);
 #else

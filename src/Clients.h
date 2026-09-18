@@ -78,12 +78,12 @@ typedef struct
 
 #if defined(OPENSSL)
 enum QUIC_MODE {
-    // QUIC_MODE is disabled
+	/* QUIC is disabled */
 	QUIC_MODE_NONE = 1,
-	// QUIC ONLY no fallback to TCP
-	QUIC_MODE_ONLY,
-	// FALLBACK to TCP if QUIC failed
-	QUIC_MODE_PREFERRED 
+	/* QUIC only - there is no automatic fallback to TCP.  For fallback,
+	   configure serverURIs with a quic:// URI first and an ssl:// or
+	   tcp:// URI second. */
+	QUIC_MODE_ONLY
 };
 typedef enum QUIC_MODE QUIC_MODE;
 #endif

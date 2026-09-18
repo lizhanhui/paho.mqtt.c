@@ -90,12 +90,31 @@ Status legend: [ ] open, [x] fixed
     passes (broker does 1.3), default connect passes, TLS 1.3-only client vs
     TLS 1.2-only local server fails fast (0.35s).
 
-- [ ] **6. `QUIC_MODE_PREFERRED` promises TCP fallback that does not exist**
+- [x] **6. `QUIC_MODE_PREFERRED` promises TCP fallback that does not exist**
   - `src/Clients.h:79-88`, `src/MQTTProtocolOut.c:270-278`
   - Enum comment claims fallback to TCP when QUIC fails; no fallback code exists.
     quic:// through networks blocking UDP hard-fails. This is the main production
     rollout risk for QUIC (UDP egress).
   - Fix: implement TCP fallback or simplify the enum to an honest on/off flag.
+  - **Fixed 2026-09-18** (per discussion: no auto-fallback — ill-defined fallback
+    port, duplicates serverURIs, and silent UDP-timeout latency). Enum collapsed
+    to `QUIC_MODE_NONE`/`QUIC_MODE_ONLY`; README documents the
+    `serverURIs {quic://, ssl://}` fallback pattern; new sample
+    `MQTTAsync_quic_fallback.c` demonstrates it.
+  - **State-pollution bug found & fixed during verification**: the documented
+    pattern initially failed — the QUIC `SSL_CTX` survived the failed attempt
+    (`SSLSocket_destroyContext` has no callers) and was reused for the TLS
+    fallback, spinning 30s in "write client hello" (8.7M trace lines, 32% CPU).
+    Fixes: `SSLSocket_setSocketForSSL` now discards a ctx whose QUIC-ness
+    (`SSL_CTX_get_ssl_method == OSSL_QUIC_client_thread_method`) doesn't match
+    the current connection; `MQTTProtocol_connect` resets
+    `net.quic_mode = QUIC_MODE_NONE` per attempt.
+  - Caveats documented in the sample: dead QUIC port fails by ~30s timeout per
+    URI (connectTimeout/QUIC handshake timeout), and MQTTVERSION_DEFAULT retries
+    each URI per MQTT version (set an explicit version to halve failover time).
+  - Verified: fallback test connects via ssl:// after dead quic:// (~61s with
+    default version attempts), sample works both quic-direct and fallback paths,
+    QUIC smoke/TLS smoke/test9000 #14 regression battery passes.
 
 ## P2 — cleanup
 

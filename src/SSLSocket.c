@@ -754,6 +754,22 @@ int SSLSocket_setSocketForSSL(networkHandles* net, MQTTClient_SSLOptions* opts,
 
 	FUNC_ENTRY;
 
+#if defined(WITH_OPENSSL_QUIC)
+	/* A QUIC SSL_CTX cannot be used for a TLS connection and vice versa.
+	   The context survives connection attempts (SSLSocket_destroyContext is
+	   not called between them), so when failing over between quic:// and
+	   ssl:// serverURIs the stale context would be reused for the wrong
+	   transport.  Discard it when it does not match the current connection
+	   type so that a matching one is created. */
+	if (net->ctx != NULL &&
+			(SSL_CTX_get_ssl_method(net->ctx) == OSSL_QUIC_client_thread_method())
+					!= (net->quic_mode > QUIC_MODE_NONE))
+	{
+		SSL_CTX_free(net->ctx);
+		net->ctx = NULL;
+	}
+#endif
+
 	if (net->ctx != NULL || (rc = SSLSocket_createContext(net, opts)) == 1)
 	{
 		char *hostname_plus_null;
