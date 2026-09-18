@@ -605,7 +605,8 @@ int MQTTAsync_connect(MQTTAsync handle, const MQTTAsync_connectOptions* options)
 			if (strncmp(URI_SSL, serverURI, strlen(URI_SSL)) == 0 ||
 				strncmp(URI_TLS, serverURI, strlen(URI_TLS)) == 0 ||
 				strncmp(URI_MQTTS, serverURI, strlen(URI_MQTTS)) == 0 ||
-				strncmp(URI_WSS, serverURI, strlen(URI_WSS)) == 0)
+				strncmp(URI_WSS, serverURI, strlen(URI_WSS)) == 0 ||
+				strncmp(URI_QUIC, serverURI, strlen(URI_QUIC)) == 0)
 			{
 				rc = MQTTASYNC_NULL_PARAMETER;
 				goto exit;

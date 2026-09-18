@@ -39,12 +39,20 @@ Status legend: [ ] open, [x] fixed
     OpenSSL >= 3.2). Verified: QUIC-on and QUIC-off (`PAHO_WITH_QUIC=OFF`)
     builds both compile; QUIC smoke test passes.
 
-- [ ] **3. NULL `sslopts` dereference for `quic://` connects without SSL options**
+- [x] **3. NULL `sslopts` dereference for `quic://` connects without SSL options**
   - `src/MQTTAsyncUtils.c:2943-2946`
   - `MQTTAsync_connect` only allocates `m->c->sslopts` when `connectOptions->ssl`
     is provided (`src/MQTTAsync.c:803`). Connecting `quic://` without ssl options
     reaches `m->c->sslopts->sslVersion = MQTT_SSL_VERSION_QUIC` with NULL → segfault.
   - Fix: guard the assignment or allocate default sslopts for `ssl == 2`.
+  - **Fixed 2026-09-18**: root cause was the `serverURIs` validation loop in
+    `MQTTAsync_connect` (`src/MQTTAsync.c:605`) — it required ssl options for
+    `ssl://`/`tls://`/`mqtts://`/`wss://` but not `quic://`, so the NULL
+    invariant could be violated via the HA path (the primary-URI path was
+    already guarded). Added `URI_QUIC` to the loop; such connects now fail
+    cleanly with `MQTTASYNC_NULL_PARAMETER` (-6). Verified: dedicated
+    serverURIs/no-sslopts test rejects cleanly (no crash), QUIC HA test
+    (test9000 #14/test2e) 95/95, QUIC smoke passes.
 
 ## P1 — should fix
 
