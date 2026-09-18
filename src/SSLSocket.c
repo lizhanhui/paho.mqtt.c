@@ -73,7 +73,7 @@ void SSLSocket_destroyContext(networkHandles* net);
 void SSLSocket_addPendingRead(SOCKET sock);
 
 #if defined(WITH_OPENSSL_QUIC)
-static int SSLSocket_is_quic_closed(SSL* ssl);
+static int SSLSocket_quic_closed_state(SSL* ssl);
 #endif
 
 /* 1 ~ we are responsible for initializing openssl; 0 ~ openssl init is done externally */
@@ -917,16 +917,19 @@ int SSLSocket_getch(SSL* ssl, SOCKET socket, char* c)
 			SocketBuffer_interrupted(socket, 0);
 		}
 	}
+	else if (rc == 0) 	/* A return value of 0 means the peer has performed an orderly shutdown. */
+	{
 #if defined(WITH_OPENSSL_QUIC)
-	else if (rc == 0) {
-		if (!SSLSocket_is_quic_closed(ssl))
-		{
+		/* for a QUIC connection that is still open, SSL_read can return 0 when no
+		   stream data is available yet - treat as interrupted and retry.
+		   For non-QUIC (TLS) connections, and closed QUIC connections, this is an
+		   orderly shutdown, so report SOCKET_ERROR as before. */
+		if (SSLSocket_quic_closed_state(ssl) == 0)
 			rc = TCPSOCKET_INTERRUPTED;
-		}
 		else
-			rc = SOCKET_ERROR; 	/* The return value from recv is 0 when the peer has performed an orderly shutdown. */
-	}
 #endif
+			rc = SOCKET_ERROR;
+	}
 	else if (rc == 1)
 	{
 		SocketBuffer_queueChar(socket, *c);
@@ -976,7 +979,10 @@ char *SSLSocket_getdata(SSL* ssl, SOCKET socket, size_t bytes, size_t* actual_le
 		else if (*rc == 0) /* rc 0 means the other end closed the socket */
 		{
 #if defined(WITH_OPENSSL_QUIC)
-			if (!SSLSocket_is_quic_closed(ssl))
+			/* as in SSLSocket_getch, only retry for a QUIC connection that is
+			   still open; non-QUIC (TLS) connections and closed QUIC connections
+			   mean the socket is closed */
+			if (SSLSocket_quic_closed_state(ssl) == 0)
 				*rc = TCPSOCKET_INTERRUPTED;
 			else
 #endif
@@ -1080,10 +1086,9 @@ int SSLSocket_putdatas(SSL* ssl, SOCKET socket, char* buf0, size_t buf0len, Pack
 	else
 	{
 #if defined(WITH_OPENSSL_QUIC)
-		if (rc == 0 && SSLSocket_is_quic_closed(ssl))
-			{
-				rc = SOCKET_ERROR;
-			}
+		/* a zero-length write on a closed QUIC connection is a hard error */
+		if (rc == 0 && SSLSocket_quic_closed_state(ssl) == 1)
+			rc = SOCKET_ERROR;
 #endif
 		sslerror = SSLSocket_error("SSL_write", ssl, socket, rc, NULL, NULL);
 		if (sslerror == SSL_ERROR_WANT_WRITE)
@@ -1200,16 +1205,26 @@ int SSLSocket_abortWrite(pending_writes* pw)
 #endif
 
 #if defined(WITH_OPENSSL_QUIC)
-// Return 0 if  QUIC connection is closed, and
-// always return 0 if it is not QUIC connection
-static int SSLSocket_is_quic_closed(SSL* ssl)
+/**
+ * Determine the close state of a QUIC connection.
+ * @param ssl the SSL object to query
+ * @return 1 if ssl is a QUIC connection that is closed or closing,
+ *         0 if ssl is a QUIC connection that is still open,
+ *        -1 if ssl is not a QUIC connection (e.g. a regular TLS connection)
+ */
+static int SSLSocket_quic_closed_state(SSL* ssl)
 {
-	int rc = 0;
-
-	FUNC_ENTRY;
+	int rc = -1;
 	SSL_CONN_CLOSE_INFO close_info = {0};
 
-	rc = SSL_get_conn_close_info(ssl, &close_info, sizeof(SSL_CONN_CLOSE_INFO));
+	FUNC_ENTRY;
+	if (!SSL_is_quic(ssl))
+		goto exit;
+
+	/* SSL_get_conn_close_info only succeeds once a QUIC connection is closed */
+	rc = SSL_get_conn_close_info(ssl, &close_info, sizeof(close_info)) == 1 ? 1 : 0;
+
+exit:
 	FUNC_EXIT_RC(rc);
 	return rc;
 }
