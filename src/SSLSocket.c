@@ -800,6 +800,12 @@ int SSLSocket_setSocketForSSL(networkHandles* net, MQTTClient_SSLOptions* opts,
 			/* Note: SSL_set_alpn_protos returns 1 for failure. */
 			SSLSocket_error("SSL_set_quic_alpn", net->ssl, net->socket, rc, NULL, NULL);
 		}
+		/* QUIC SSL objects are blocking by default.  Switch to non-blocking
+		   before the first SSL_connect() so the handshake can be driven by the
+		   SSL_IN_PROGRESS state machine instead of blocking the calling thread
+		   for the whole handshake timeout. */
+		if (SSL_set_blocking_mode(net->ssl, 0) != 1)
+			SSLSocket_error("SSL_set_blocking_mode", net->ssl, net->socket, 0, NULL, NULL);
 		// Client side QUIC
 		SSL_set_connect_state(net->ssl);
 	}

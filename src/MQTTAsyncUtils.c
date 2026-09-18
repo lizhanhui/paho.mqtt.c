@@ -2909,6 +2909,13 @@ static int MQTTAsync_connecting(MQTTAsyncs* m)
 			serverURI += strlen(URI_WSS);
 			default_port = WSS_DEFAULT_PORT;
 		}
+#if defined(WITH_OPENSSL_QUIC)
+		else if (strncmp(URI_QUIC, serverURI, strlen(URI_QUIC)) == 0)
+		{
+			serverURI += strlen(URI_QUIC);
+			default_port = QUIC_DEFAULT_PORT;
+		}
+#endif
 #endif
 	}
 

@@ -185,3 +185,131 @@ Not client bugs — constraints/notes for production against TDMQ:
 Connect/auth, pub/sub QoS 0–2, retained messages, wills, 10 concurrent
 connections, HA serverURIs failover, 256 KB big messages — over TCP 1883,
 SSL 8883, WS 80, WSS 443, QUIC 14567.
+
+## Follow-up review — open issues
+
+Review repeated at `094c84b` on 2026-09-18. These issues remain open.
+
+### P0 — must fix before merge
+
+- [x] **11. QUIC handshake blocks the MQTTAsync command thread**
+  - `src/MQTTProtocolOut.c:317-330`
+  - QUIC objects are blocking by default, but `SSL_set_blocking_mode(ssl, 0)` is
+    called only after `SSL_connect()` succeeds. An unreachable peer therefore
+    blocks the asynchronous command thread for OpenSSL's handshake timeout
+    (observed at approximately 30 seconds), preventing `connectTimeout` and
+    other clients' work from being processed promptly.
+  - Fix: call and check `SSL_set_blocking_mode(net.ssl, 0)` after binding the
+    socket and before the first `SSL_connect()` call.
+  - **Verified valid before fixing** (trace evidence: one blocking `SSL_connect`
+    call held the command thread ~30s on a dead QUIC port; `connectTimeout=10`
+    could not preempt it).
+  - **Fixed 2026-09-18**: `SSL_set_blocking_mode(ssl, 0)` now called in
+    `SSLSocket_setSocketForSSL`'s QUIC branch (before the first `SSL_connect`),
+    covering all connect paths; the redundant post-success call in
+    `MQTTProtocolOut.c` removed. Handshake is now driven by the
+    `SSL_IN_PROGRESS` state machine like TLS. Verified: dead-QUIC-port fallback
+    completes in ~13s (was ~61s) with `connectTimeout=10` effective; full
+    test9000 QUIC suite, smokes, and fallback sample all pass.
+
+- [ ] **12. No-SSL sample builds are broken**
+  - `src/samples/CMakeLists.txt:58-94`
+  - Existing TCP samples now link to `paho-mqtt3as`/`paho-mqtt3cs`, and QUIC
+    samples are created unconditionally. With `PAHO_BUILD_SAMPLES=ON` and
+    `PAHO_WITH_SSL=OFF`, linking fails because the SSL targets do not exist.
+  - Fix: retain the non-SSL libraries for ordinary samples and add/install QUIC
+    samples only when effective QUIC support is enabled.
+
+- [ ] **13. Bundled QUIC test certificates are expired**
+  - `test/ssl/emqx/etc/certs/cert.pem`
+  - `test/ssl/emqx/etc/certs/client-cert.pem`
+  - Both certificates expired on 2026-02-12. `openssl verify` now rejects them,
+    so positive certificate-authentication tests cannot validate QUIC.
+  - Fix: replace or generate maintained test certificates and add an expiry
+    check to CI.
+
+- [ ] **14. QUIC read failures are classified without `SSL_get_error()`**
+  - `src/SSLSocket.c:951-972, 1010-1033`
+  - OpenSSL requires `SSL_get_error()` for every `SSL_read()` result `<= 0`.
+    The new zero-result path instead checks only connection-close information,
+    which cannot distinguish retry, stream EOF, and all fatal errors. A stream
+    FIN or fatal error on an otherwise open QUIC connection can be retried
+    indefinitely.
+  - Fix: preserve the exact `SSL_read()` result, classify it with
+    `SSL_get_error()`, and retry only `SSL_ERROR_WANT_READ`/`WANT_WRITE`.
+
+### P1 — should fix before merge
+
+- [ ] **15. Transport state leaks between `serverURIs` attempts**
+  - `src/MQTTAsyncUtils.c:1320-1367`
+  - `ssl`, `websocket`, and `unixsock` are set for a URI but not reset before
+    parsing the next one. In particular, the documented `quic://` to `tcp://`
+    fallback leaves `ssl == 2` and opens UDP again instead of TCP.
+  - Fix: reset all per-URI transport flags before parsing each URI, then derive
+    them exclusively from the current scheme.
+
+- [x] **16. Continued QUIC handshakes use the unparsed URI**
+  - `src/MQTTAsyncUtils.c:2875-2911`
+  - `MQTTAsync_connecting()` strips TCP, WebSocket, and TLS schemes, but has no
+    `URI_QUIC` branch. Once the handshake is made nonblocking, continuation can
+    pass `quic://...` to hostname parsing and certificate verification, causing
+    verification against the wrong host.
+  - Fix: strip `URI_QUIC` and select `QUIC_DEFAULT_PORT` in this path.
+  - **Fixed 2026-09-18** (together with #11, as flagged during #11
+    verification): `URI_QUIC` branch added to the scheme-stripping chain in
+    `MQTTAsync_connecting()`, selecting `QUIC_DEFAULT_PORT`. Verified:
+    port-less `quic://<host>` through the serverURIs path connects to 14567 in
+    ~1s with certificate verification enabled.
+
+- [ ] **17. MQTTAsync documents an undefined TLS 1.3 constant**
+  - `src/MQTTAsync.h:1054-1058, 1113-1118`
+  - The header documents `MQTT_SSL_VERSION_TLS_1_3`, but only
+    `MQTTClient.h` defines it. A program including only `MQTTAsync.h` fails to
+    compile when using the documented option.
+  - Fix: define the TLS 1.3 constant consistently in both public headers.
+
+- [ ] **18. QUIC setup failures are ignored or misclassified**
+  - `src/SSLSocket.c:558-568, 795-804, 1129-1134`
+  - Failure to create a QUIC context falls through to creation of a normal TLS
+    context over UDP. Mandatory ALPN setup failure is logged but overwritten by
+    later return values. The write path changes a zero `SSL_write()` result to
+    `SOCKET_ERROR` before passing it to `SSL_get_error()`, violating OpenSSL's
+    requirement to pass the exact operation result.
+  - Fix: fail immediately on QUIC context or ALPN setup failure, and preserve
+    operation return values until after `SSL_get_error()`.
+
+- [ ] **19. Requested and effective QUIC support use different CMake guards**
+  - `src/CMakeLists.txt:240-244`
+  - `test/CMakeLists.txt:1261-1352`
+  - `src/samples/CMakeLists.txt:58-94`
+  - OpenSSL older than 3.2, LibreSSL, or missing SSL support can leave
+    `PAHO_WITH_QUIC=ON` while `WITH_OPENSSL_QUIC` is absent. Tests and samples
+    are gated by the requested option rather than actual library capability.
+  - Fix: reject unsupported configurations or expose one effective capability
+    variable and use it for libraries, tests, and samples.
+
+- [ ] **20. QUIC tests contain false-positive paths**
+  - `test/test5.c:1014-1020, 1115-1121, 2243-2252, 2420-2424`
+  - `test/emqx.conf:36-68`
+  - Negative certificate tests use port 18887, for which EMQX defines no
+    listener, and do not fail when the expected callback never occurs. The
+    big-message test asserts that mismatched bytes are unequal, so corruption
+    passes, and overwrites the `MQTTAsync_connect()` return code with zero.
+  - Fix: configure the intended listeners, assert callback completion and the
+    expected TLS failure, compare payload bytes for equality, and preserve the
+    real connect result.
+
+- [ ] **21. QUIC sample reconnects omit required SSL options**
+  - `src/samples/MQTTAsync_quic_publish.c:38-53`
+  - `src/samples/MQTTAsync_quic_subscribe.c:42-60`
+  - The connection-loss callbacks build fresh connect options without `ssl`,
+    credentials, or callback context. QUIC reconnect therefore returns
+    `MQTTASYNC_NULL_PARAMETER`.
+  - Fix: preserve the original options or use `automaticReconnect`.
+
+### P2 — cleanup
+
+- [ ] **22. Changed lines fail `git diff --check`**
+  - Trailing or mixed indentation remains in the Linux workflow,
+    `src/SSLSocket.c`, and all three QUIC samples.
+  - Fix: remove trailing whitespace and normalize indentation before merge.
