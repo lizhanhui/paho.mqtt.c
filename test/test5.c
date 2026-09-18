@@ -1018,6 +1018,8 @@ int test2b(struct Options options)
 		usleep(10000L);
 #endif
 
+	assert("connect result callback was called", test2bFinished == 1, "test2bFinished was %d", test2bFinished);
+
 	exit: MQTTAsync_destroy(&c);
 	MyLog(LOGA_INFO, "%s: test %s. %d tests run, %d failures.",
 			(failures == 0) ? "passed" : "failed", testname, tests, failures);
@@ -1118,6 +1120,8 @@ int test2c(struct Options options)
 #else
 		usleep(10000L);
 #endif
+
+	assert("connect result callback was called", test2cFinished == 1, "test2cFinished was %d", test2cFinished);
 
 	exit: MQTTAsync_destroy(&c);
 	MyLog(LOGA_INFO, "%s: test %s. %d tests run, %d failures.",
@@ -1575,6 +1579,8 @@ int test3b(struct Options options)
 #else
 		usleep(10000L);
 #endif
+
+	assert("connect result callback was called", test3bFinished == 1, "test3bFinished was %d", test3bFinished);
 
 	exit: MQTTAsync_destroy(&c);
 	MyLog(LOGA_INFO, "%s: test %s. %d tests run, %d failures.",
@@ -2246,8 +2252,8 @@ int test7MessageArrived(void* context, char* topicName, int topicLen,
 	{
 		if (((char*) test7_payload)[i] != ((char*) message->payload)[i])
 		{
-			assert("Message contents correct", ((char*)test7_payload)[i] != ((char*)message->payload)[i],
-					"message content was %c", ((char*)message->payload)[i]);
+			assert("Message contents correct", ((char*)test7_payload)[i] == ((char*)message->payload)[i],
+					"message content differs at index %d", i);
 			break;
 		}
 	}
@@ -2419,7 +2425,6 @@ int test7(struct Options options)
 
 	MyLog(LOGA_DEBUG, "Connecting");
 	rc = MQTTAsync_connect(c, &opts);
-	rc = 0;
 	assert("Good rc from connect", rc == MQTTASYNC_SUCCESS, "rc was %d", rc);
 	if (rc != MQTTASYNC_SUCCESS)
 		goto exit;
@@ -2710,6 +2715,7 @@ int test10(struct Options options)
 	MQTTAsync_willOptions wopts = MQTTAsync_willOptions_initializer;
 	MQTTAsync_SSLOptions sslopts = MQTTAsync_SSLOptions_initializer;
 	int rc = 0;
+	int count = 0;
 
 	failures = 0;
 	test10Finished = 0;
@@ -2771,12 +2777,14 @@ int test10(struct Options options)
 	if (rc != MQTTASYNC_SUCCESS)
 		goto exit;
 
-	while (!test10Finished)
+	while (!test10Finished && ++count < 10000)
 #if defined(_WIN32)
 		Sleep(100);
 #else
 		usleep(10000L);
 #endif
+
+	assert("connect result callback was called", test10Finished == 1, "test10Finished was %d", test10Finished);
 	MyLog(LOGA_DEBUG, "Stopping");
 
 	exit: MQTTAsync_destroy(&c);

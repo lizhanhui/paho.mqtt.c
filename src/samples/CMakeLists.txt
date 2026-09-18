@@ -90,8 +90,8 @@ if(PAHO_BUILD_SHARED)
     LIBRARY DESTINATION ${CMAKE_INSTALL_LIBDIR}
   )
 
-  # QUIC samples need the SSL-enabled asynchronous library
-  if(PAHO_WITH_SSL)
+  # QUIC samples need the SSL-enabled asynchronous library with QUIC support
+  if(PAHO_QUIC_ENABLED)
     foreach(TARGET MQTTAsync_quic_publish MQTTAsync_quic_subscribe MQTTAsync_quic_fallback)
       add_executable(${TARGET} ${TARGET}.c)
       set_target_properties(${TARGET} PROPERTIES

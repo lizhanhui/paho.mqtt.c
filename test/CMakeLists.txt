@@ -1258,7 +1258,7 @@ if(PAHO_WITH_SSL OR PAHO_WITH_LIBRESSL)
 	ENDIF()
 ENDIF()
 
-IF (PAHO_WITH_QUIC)
+IF (PAHO_QUIC_ENABLED)
 	# QUIC test certificates are generated on demand (never committed)
 	IF (NOT EXISTS ${EMQX_CERTDIR}/cacert.pem)
 		message(STATUS "Generating QUIC test certificates with ${EMQX_CERTDIR}/gen.sh")

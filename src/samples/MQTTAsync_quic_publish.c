@@ -35,6 +35,11 @@
 
 int finished = 0;
 
+/* kept at file scope so the reconnect in connlost() can reuse them */
+static const char* g_username = NULL;
+static const char* g_password = NULL;
+static MQTTAsync_SSLOptions g_sslopts = MQTTAsync_SSLOptions_initializer;
+
 void connlost(void *context, char *cause)
 {
 	MQTTAsync client = (MQTTAsync)context;
@@ -47,6 +52,10 @@ void connlost(void *context, char *cause)
 	printf("Reconnecting\n");
 	conn_opts.keepAliveInterval = 20;
 	conn_opts.cleansession = 1;
+	conn_opts.username = g_username;
+	conn_opts.password = g_password;
+	conn_opts.ssl = &g_sslopts;
+	conn_opts.context = client;
 	if ((rc = MQTTAsync_connect(client, &conn_opts)) != MQTTASYNC_SUCCESS)
 	{
 		printf("Failed to start connect, return code %d\n", rc);
@@ -148,13 +157,12 @@ int main(int argc, char* argv[])
 	MQTTAsync_setTraceLevel(MQTTASYNC_TRACE_MINIMUM);
 	//MQTTAsync_setTraceLevel(MQTTASYNC_TRACE_PROTOCOL);
 	MQTTAsync_connectOptions conn_opts = MQTTAsync_connectOptions_initializer;
-	MQTTAsync_SSLOptions sslopts = MQTTAsync_SSLOptions_initializer;
-	sslopts.enableServerCertAuth = 0; //for simplicity, we don't verify the server certificate
+	g_sslopts.enableServerCertAuth = 0; //for simplicity, we don't verify the server certificate
 	int rc;
 
     const char* uri = (argc > 1) ? argv[1] : ADDRESS;
-    const char* username = (argc > 2) ? argv[2] : NULL;
-    const char* password = (argc > 3) ? argv[3] : NULL;
+    g_username = (argc > 2) ? argv[2] : NULL;
+    g_password = (argc > 3) ? argv[3] : NULL;
 
 
 	if ((rc = MQTTAsync_create(&client, uri, CLIENTID, MQTTCLIENT_PERSISTENCE_NONE, NULL)) != MQTTASYNC_SUCCESS)
@@ -171,14 +179,14 @@ int main(int argc, char* argv[])
 
 	conn_opts.keepAliveInterval = 20;
 	conn_opts.cleansession = 1;
-	conn_opts.username = username;
-	conn_opts.password = password;
+	conn_opts.username = g_username;
+	conn_opts.password = g_password;
 	conn_opts.onSuccess = onConnect;
 	conn_opts.onFailure = onConnectFailure;
 	conn_opts.httpProxy = NULL;
 	conn_opts.httpsProxy = NULL;
 	conn_opts.context = client;
-	conn_opts.ssl = &sslopts;
+	conn_opts.ssl = &g_sslopts;
 	if ((rc = MQTTAsync_connect(client, &conn_opts)) != MQTTASYNC_SUCCESS)
 	{
 		printf("Failed to start connect, return code %d\n", rc);

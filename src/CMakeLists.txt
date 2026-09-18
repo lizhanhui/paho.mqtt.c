@@ -228,25 +228,38 @@ install(
     ${CMAKE_INSTALL_INCLUDEDIR}
 )
 
+# PAHO_QUIC_ENABLED reflects *effective* QUIC support (requested AND the TLS
+# library provides the QUIC API), as opposed to the requested PAHO_WITH_QUIC.
+# Libraries, tests and samples must gate on PAHO_QUIC_ENABLED.
+set(PAHO_QUIC_ENABLED FALSE)
+
 if(PAHO_WITH_SSL OR PAHO_WITH_LIBRESSL)
   if(PAHO_WITH_LIBRESSL)
     find_package(LibreSSL REQUIRED)
     set(SSL_LIBRARY_NAME LibreSSL)
     set(SSL_INCLUDE_DIR ${LIBRESSL_INCLUDE_DIR})
     set(SSL_ROOT_DIR ${LIBRESSL_ROOT_DIR})
+    if (PAHO_WITH_QUIC)
+      message(WARNING "PAHO_WITH_QUIC requires OpenSSL >= 3.2; LibreSSL does not support QUIC - QUIC support disabled")
+    endif()
   else()
     find_package(OpenSSL REQUIRED)
 
     if (PAHO_WITH_QUIC AND NOT "${OPENSSL_VERSION}" VERSION_LESS "3.2")
       set(COMPILE_WITH_QUIC "WITH_OPENSSL_QUIC=1")
+      set(PAHO_QUIC_ENABLED TRUE)
     else()
       set(COMPILE_WITH_QUIC "")
+      if (PAHO_WITH_QUIC)
+        message(WARNING "PAHO_WITH_QUIC requires OpenSSL >= 3.2 (found ${OPENSSL_VERSION}) - QUIC support disabled")
+      endif()
     endif()
 
     set(SSL_LIBRARY_NAME OpenSSL)
     set(SSL_INCLUDE_DIR ${OPENSSL_INCLUDE_DIR})
     set(SSL_ROOT_DIR ${OPENSSL_ROOT_DIR})
   endif()
+  set(PAHO_QUIC_ENABLED ${PAHO_QUIC_ENABLED} PARENT_SCOPE)
   message(STATUS "Using ${SSL_LIBRARY_NAME} with headers at ${SSL_INCLUDE_DIR}")
 
   if(PAHO_BUILD_SHARED)

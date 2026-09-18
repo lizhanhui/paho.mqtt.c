@@ -295,14 +295,18 @@ Review repeated at `094c84b` on 2026-09-18. These issues remain open.
     port-less `quic://<host>` through the serverURIs path connects to 14567 in
     ~1s with certificate verification enabled.
 
-- [ ] **17. MQTTAsync documents an undefined TLS 1.3 constant**
+- [x] **17. MQTTAsync documents an undefined TLS 1.3 constant**
   - `src/MQTTAsync.h:1054-1058, 1113-1118`
   - The header documents `MQTT_SSL_VERSION_TLS_1_3`, but only
     `MQTTClient.h` defines it. A program including only `MQTTAsync.h` fails to
     compile when using the documented option.
   - Fix: define the TLS 1.3 constant consistently in both public headers.
+  - **Fixed 2026-09-18**: added `MQTT_SSL_VERSION_TLS_1_3` (and
+    `MQTT_SSL_VERSION_QUIC`) to `MQTTAsync.h`, matching `MQTTClient.h`.
+    Verified: a TU including only `MQTTAsync.h` and using the constant
+    compiles.
 
-- [ ] **18. QUIC setup failures are ignored or misclassified**
+- [x] **18. QUIC setup failures are ignored or misclassified**
   - `src/SSLSocket.c:558-568, 795-804, 1129-1134`
   - Failure to create a QUIC context falls through to creation of a normal TLS
     context over UDP. Mandatory ALPN setup failure is logged but overwritten by
@@ -311,8 +315,15 @@ Review repeated at `094c84b` on 2026-09-18. These issues remain open.
     requirement to pass the exact operation result.
   - Fix: fail immediately on QUIC context or ALPN setup failure, and preserve
     operation return values until after `SSL_get_error()`.
+  - **Fixed 2026-09-18**: QUIC `SSL_CTX_new` failure now returns 0 immediately
+    (no TLS fall-through); ALPN and `SSL_set_blocking_mode` failures are fatal
+    (rc=0, exit) instead of log-and-continue; `putdatas` passes the exact
+    `SSL_write` result to `SSL_get_error` (the pre-mapping was removed — the
+    existing `else rc = SOCKET_ERROR` already covers ZERO_RETURN/SSL_FATAL).
+    `SSLSocket_quic_closed_state`, now unused, was deleted. Verified: full
+    build clean, test9000 QUIC suite and smokes pass.
 
-- [ ] **19. Requested and effective QUIC support use different CMake guards**
+- [x] **19. Requested and effective QUIC support use different CMake guards**
   - `src/CMakeLists.txt:240-244`
   - `test/CMakeLists.txt:1261-1352`
   - `src/samples/CMakeLists.txt:58-94`
@@ -321,8 +332,15 @@ Review repeated at `094c84b` on 2026-09-18. These issues remain open.
     are gated by the requested option rather than actual library capability.
   - Fix: reject unsupported configurations or expose one effective capability
     variable and use it for libraries, tests, and samples.
+  - **Fixed 2026-09-18**: new `PAHO_QUIC_ENABLED` variable computed in
+    `src/CMakeLists.txt` (true only when QUIC requested AND OpenSSL >= 3.2,
+    pushed to parent scope for `test/` and `src/samples/`); a CMake WARNING is
+    issued when QUIC was requested but can't be enabled (old OpenSSL or
+    LibreSSL). Tests (`test9000`) and QUIC samples now gate on
+    `PAHO_QUIC_ENABLED`. Verified: QUIC-off configure+build has no test9000
+    target and no QUIC samples; QUIC-on build unchanged.
 
-- [ ] **20. QUIC tests contain false-positive paths**
+- [x] **20. QUIC tests contain false-positive paths**
   - `test/test5.c:1014-1020, 1115-1121, 2243-2252, 2420-2424`
   - `test/emqx.conf:36-68`
   - Negative certificate tests use port 18887, for which EMQX defines no
@@ -332,14 +350,28 @@ Review repeated at `094c84b` on 2026-09-18. These issues remain open.
   - Fix: configure the intended listeners, assert callback completion and the
     expected TLS failure, compare payload bytes for equality, and preserve the
     real connect result.
+  - **Fixed 2026-09-18**: `emqx.conf` gains the 18887 mutual-auth listener
+    (`mtls_nocert`, verify_peer); test2b/2c/3b assert the connect-result
+    callback fired after their wait loops (test2d already did), and test10's
+    unbounded wait is now bounded with the same assert; test7 compares payload
+    bytes for equality (the inverted `!=` assert made corruption pass) and no
+    longer overwrites the `MQTTAsync_connect()` return code. Verified:
+    test9000 #2/#10 (test7) and #13 (now 5 assertions) pass against TDMQ;
+    2b/2c against the EMQX rig remain deferred with #13 (remote docker).
 
-- [ ] **21. QUIC sample reconnects omit required SSL options**
+- [x] **21. QUIC sample reconnects omit required SSL options**
   - `src/samples/MQTTAsync_quic_publish.c:38-53`
   - `src/samples/MQTTAsync_quic_subscribe.c:42-60`
   - The connection-loss callbacks build fresh connect options without `ssl`,
     credentials, or callback context. QUIC reconnect therefore returns
     `MQTTASYNC_NULL_PARAMETER`.
   - Fix: preserve the original options or use `automaticReconnect`.
+  - **Fixed 2026-09-18**: credentials and `MQTTAsync_SSLOptions` moved to
+    file-scope statics in both QUIC samples; `connlost()` reconnects with the
+    same username/password/ssl/context (and callbacks, in the subscribe
+    sample) as the initial connect. Verified: samples build and run normally
+    against TDMQ; reconnect path now identical-by-construction to the initial
+    connect.
 
 ### P2 — cleanup
 

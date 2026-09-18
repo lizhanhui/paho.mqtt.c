@@ -72,10 +72,6 @@ int SSLSocket_createContext(networkHandles* net, MQTTClient_SSLOptions* opts);
 void SSLSocket_destroyContext(networkHandles* net);
 void SSLSocket_addPendingRead(SOCKET sock);
 
-#if defined(WITH_OPENSSL_QUIC)
-static int SSLSocket_quic_closed_state(SSL* ssl);
-#endif
-
 /* 1 ~ we are responsible for initializing openssl; 0 ~ openssl init is done externally */
 static int handle_openssl_init = 1;
 static ssl_mutex_type* sslLocks = NULL;
@@ -559,6 +555,16 @@ int SSLSocket_createContext(networkHandles* net, MQTTClient_SSLOptions* opts)
 	{
 		Log(TRACE_MINIMUM, -1, "Creating QUIC context");
 		net->ctx = SSL_CTX_new(OSSL_QUIC_client_thread_method());
+		if (net->ctx == NULL)
+		{
+			/* do not fall through to TLS context creation for a QUIC connection */
+			if (opts->struct_version >= 3)
+				SSLSocket_error("SSL_CTX_new (QUIC)", NULL, net->socket, rc, opts->ssl_error_cb, opts->ssl_error_context);
+			else
+				SSLSocket_error("SSL_CTX_new (QUIC)", NULL, net->socket, rc, NULL, NULL);
+			rc = 0;
+			goto exit;
+		}
 	}
 #endif
 
@@ -797,15 +803,22 @@ int SSLSocket_setSocketForSSL(networkHandles* net, MQTTClient_SSLOptions* opts,
 		/* ALPN is mandtory for QUIC */
 		static const unsigned char alpn[] = {4, 'm', 'q', 't', 't'};
 		if ((rc = SSL_set_alpn_protos(net->ssl, alpn, sizeof(alpn)))) {
-			/* Note: SSL_set_alpn_protos returns 1 for failure. */
+			/* Note: SSL_set_alpn_protos returns 1 for failure.  ALPN is
+			   mandatory for MQTT over QUIC, so fail the setup. */
 			SSLSocket_error("SSL_set_quic_alpn", net->ssl, net->socket, rc, NULL, NULL);
+			rc = 0;
+			goto exit;
 		}
 		/* QUIC SSL objects are blocking by default.  Switch to non-blocking
 		   before the first SSL_connect() so the handshake can be driven by the
 		   SSL_IN_PROGRESS state machine instead of blocking the calling thread
 		   for the whole handshake timeout. */
 		if (SSL_set_blocking_mode(net->ssl, 0) != 1)
+		{
 			SSLSocket_error("SSL_set_blocking_mode", net->ssl, net->socket, 0, NULL, NULL);
+			rc = 0;
+			goto exit;
+		}
 		// Client side QUIC
 		SSL_set_connect_state(net->ssl);
 	}
@@ -1134,11 +1147,9 @@ int SSLSocket_putdatas(SSL* ssl, SOCKET socket, char* buf0, size_t buf0len, Pack
 		rc = TCPSOCKET_COMPLETE;
 	else
 	{
-#if defined(WITH_OPENSSL_QUIC)
-		/* a zero-length write on a closed QUIC connection is a hard error */
-		if (rc == 0 && SSLSocket_quic_closed_state(ssl) == 1)
-			rc = SOCKET_ERROR;
-#endif
+		/* pass the exact SSL_write() result to SSL_get_error(), as required by
+		   OpenSSL; a zero write on a closed (QUIC) connection yields
+		   ZERO_RETURN/SYSCALL here, which falls through to SOCKET_ERROR below */
 		sslerror = SSLSocket_error("SSL_write", ssl, socket, rc, NULL, NULL);
 		if (sslerror == SSL_ERROR_WANT_WRITE)
 		{
@@ -1248,32 +1259,6 @@ int SSLSocket_abortWrite(pending_writes* pw)
 
 	FUNC_ENTRY;
 	free(pw->iovecs[0].iov_base);
-	FUNC_EXIT_RC(rc);
-	return rc;
-}
-#endif
-
-#if defined(WITH_OPENSSL_QUIC)
-/**
- * Determine the close state of a QUIC connection.
- * @param ssl the SSL object to query
- * @return 1 if ssl is a QUIC connection that is closed or closing,
- *         0 if ssl is a QUIC connection that is still open,
- *        -1 if ssl is not a QUIC connection (e.g. a regular TLS connection)
- */
-static int SSLSocket_quic_closed_state(SSL* ssl)
-{
-	int rc = -1;
-	SSL_CONN_CLOSE_INFO close_info = {0};
-
-	FUNC_ENTRY;
-	if (!SSL_is_quic(ssl))
-		goto exit;
-
-	/* SSL_get_conn_close_info only succeeds once a QUIC connection is closed */
-	rc = SSL_get_conn_close_info(ssl, &close_info, sizeof(close_info)) == 1 ? 1 : 0;
-
-exit:
 	FUNC_EXIT_RC(rc);
 	return rc;
 }
