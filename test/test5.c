@@ -47,6 +47,10 @@ void usage(void)
 	printf("\t--client_key <key_file> - Use <key_file> as the client certificate for SSL authentication\n");
 	printf("\t--client_key_pass <password> - Use <password> to access the private key in the client certificate\n");
 	printf("\t--server_key <key_file> - Use <key_file> as the trusted certificate for server\n");
+	printf("\t--username <username> - Use <username> for MQTT authentication (overrides built-in default)\n");
+	printf("\t--password <password> - Use <password> for MQTT authentication (overrides built-in default)\n");
+	printf("\t--same_port - Use the base connection (hostname/start_port) for all tests, for servers\n");
+	printf("\t\twith a single listener instead of the local multi-port test rig\n");
 	printf("\t--verbose - Enable verbose output \n");
 	printf("\t--help - This help output\n");
 	exit(EXIT_FAILURE);
@@ -65,6 +69,10 @@ struct Options
 	char* server_key_file;
 	char* client_private_key_file;
 	char* capath;
+	char* username;
+	char* password;
+	char* hostname;
+	int same_port;
 	int verbose;
 	int test_no;
 	int size;
@@ -85,6 +93,10 @@ struct Options
 	NULL, // "../../../test/ssl/test-root-ca.crt",
 	NULL, // "../../../test/ssl/capath",
 	NULL,
+	NULL,
+	NULL,
+	NULL,
+	0,
 	0,
 	0,
 	5000000,
@@ -172,6 +184,7 @@ void getopts(int argc, char** argv)
 			{
 				char* prefix = "";
 
+				options.hostname = argv[count];
 				if (options.websockets)
 					prefix = "wss";
 				else if (options.quic)
@@ -211,6 +224,28 @@ void getopts(int argc, char** argv)
 		{
 			options.quic = 1;
 			printf("\nSetting QUIC on\n");
+		}
+		else if (strcmp(argv[count], "--username") == 0)
+		{
+			if (++count < argc)
+			{
+				options.username = argv[count];
+				printf("Setting username to %s\n", options.username);
+			}
+			else
+				usage();
+		}
+		else if (strcmp(argv[count], "--password") == 0)
+		{
+			if (++count < argc)
+				options.password = argv[count];
+			else
+				usage();
+		}
+		else if (strcmp(argv[count], "--same_port") == 0)
+		{
+			options.same_port = 1;
+			printf("\nSetting same_port on\n");
 		}
 
 		else if (strcmp(argv[count], "--size") == 0)
@@ -727,8 +762,8 @@ int test1(struct Options options)
 
 	opts.keepAliveInterval = 20;
 	opts.cleansession = 1;
-	opts.username = "testuser";
-	opts.password = "testpassword";
+	opts.username = options.username ? options.username : "testuser";
+	opts.password = options.password ? options.password : "testpassword";
 
 	opts.will = &wopts;
 	opts.will->message = "will message";
@@ -828,8 +863,8 @@ int test2a(struct Options options)
 
 	opts.keepAliveInterval = 20;
 	opts.cleansession = 1;
-	opts.username = "testuser";
-	opts.password = "testpassword";
+	opts.username = options.username ? options.username : "testuser";
+	opts.password = options.password ? options.password : "testpassword";
 
 	opts.will = &wopts;
 	opts.will->message = "will message";
@@ -945,8 +980,8 @@ int test2b(struct Options options)
 
 	opts.keepAliveInterval = 20;
 	opts.cleansession = 1;
-	opts.username = "testuser";
-	opts.password = "testpassword";
+	opts.username = options.username ? options.username : "testuser";
+	opts.password = options.password ? options.password : "testpassword";
 
 	opts.will = &wopts;
 	opts.will->message = "will message";
@@ -1044,8 +1079,8 @@ int test2c(struct Options options)
 
 	opts.keepAliveInterval = 20;
 	opts.cleansession = 1;
-	opts.username = "testuser";
-	opts.password = "testpassword";
+	opts.username = options.username ? options.username : "testuser";
+	opts.password = options.password ? options.password : "testpassword";
 
 	opts.will = &wopts;
 	opts.will->message = "will message";
@@ -1264,8 +1299,8 @@ int test2e(struct Options options)
 
 	opts.keepAliveInterval = 20;
 	opts.cleansession = 1;
-	opts.username = "testuser";
-	opts.password = "testpassword";
+	opts.username = options.username ? options.username : "testuser";
+	opts.password = options.password ? options.password : "testpassword";
 
 	opts.will = &wopts;
 	opts.will->message = "will message";
@@ -1377,8 +1412,8 @@ int test3a(struct Options options)
 
 	opts.keepAliveInterval = 20;
 	opts.cleansession = 1;
-	opts.username = "testuser";
-	opts.password = "testpassword";
+	opts.username = options.username ? options.username : "testuser";
+	opts.password = options.password ? options.password : "testpassword";
 
 	opts.will = &wopts;
 	opts.will->message = "will message";
@@ -1508,8 +1543,8 @@ int test3b(struct Options options)
 
 	opts.keepAliveInterval = 20;
 	opts.cleansession = 1;
-	opts.username = "testuser";
-	opts.password = "testpassword";
+	opts.username = options.username ? options.username : "testuser";
+	opts.password = options.password ? options.password : "testpassword";
 
 	opts.will = &wopts;
 	opts.will->message = "will message";
@@ -1602,8 +1637,8 @@ int test4(struct Options options)
 
 	opts.keepAliveInterval = 20;
 	opts.cleansession = 1;
-	opts.username = "testuser";
-	opts.password = "testpassword";
+	opts.username = options.username ? options.username : "testuser";
+	opts.password = options.password ? options.password : "testpassword";
 
 	opts.will = &wopts;
 	opts.will->message = "will message";
@@ -1719,8 +1754,8 @@ int test5a(struct Options options)
 
 	opts.keepAliveInterval = 20;
 	opts.cleansession = 1;
-	opts.username = "testuser";
-	opts.password = "testpassword";
+	opts.username = options.username ? options.username : "testuser";
+	opts.password = options.password ? options.password : "testpassword";
 
 	opts.will = &wopts;
 	opts.will->message = "will message";
@@ -1855,8 +1890,8 @@ int test5b(struct Options options)
 
 	opts.keepAliveInterval = 20;
 	opts.cleansession = 1;
-	opts.username = "testuser";
-	opts.password = "testpassword";
+	opts.username = options.username ? options.username : "testuser";
+	opts.password = options.password ? options.password : "testpassword";
 
 	opts.will = &wopts;
 	opts.will->message = "will message";
@@ -1980,8 +2015,8 @@ int test5c(struct Options options)
 
 	opts.keepAliveInterval = 20;
 	opts.cleansession = 1;
-	opts.username = "testuser";
-	opts.password = "testpassword";
+	opts.username = options.username ? options.username : "testuser";
+	opts.password = options.password ? options.password : "testpassword";
 
 	opts.will = &wopts;
 	opts.will->message = "will message";
@@ -2083,8 +2118,8 @@ int test6(struct Options options)
 
 		opts.keepAliveInterval = 20;
 		opts.cleansession = 1;
-		opts.username = "testuser";
-		opts.password = "testpassword";
+		opts.username = options.username ? options.username : "testuser";
+		opts.password = options.password ? options.password : "testpassword";
 
 		opts.will = &wopts;
 		opts.will->message = "will message";
@@ -2356,8 +2391,8 @@ int test7(struct Options options)
 
 	opts.keepAliveInterval = 60;
 	opts.cleansession = 1;
-	//opts.username = "testuser";
-	//opts.password = "testpassword";
+	opts.username = options.username;
+	opts.password = options.password;
 
 	opts.will = &wopts;
 	opts.will->message = "will message";
@@ -2476,8 +2511,8 @@ int test8(struct Options options)
 
 	opts.keepAliveInterval = 20;
 	opts.cleansession = 1;
-	opts.username = "testuser";
-	opts.password = "testpassword";
+	opts.username = options.username ? options.username : "testuser";
+	opts.password = options.password ? options.password : "testpassword";
 
 	opts.onSuccess = asyncTestOnConnect;
 	opts.onFailure = asyncTestOnSubscribeFailure;
@@ -2574,8 +2609,8 @@ int test9(struct Options options)
 
 	opts.keepAliveInterval = 20;
 	opts.cleansession = 1;
-	opts.username = "testuser";
-	opts.password = "testpassword";
+	opts.username = options.username ? options.username : "testuser";
+	opts.password = options.password ? options.password : "testpassword";
 
 	opts.will = &wopts;
 	opts.will->message = "will message";
@@ -2698,8 +2733,8 @@ int test10(struct Options options)
 
 	opts.keepAliveInterval = 20;
 	opts.cleansession = 1;
-	opts.username = "testuser";
-	opts.password = "testpassword";
+	opts.username = options.username ? options.username : "testuser";
+	opts.password = options.password ? options.password : "testpassword";
 
 	opts.will = &wopts;
 	opts.will->message = "will message";
@@ -2764,6 +2799,21 @@ int main(int argc, char** argv)
 
 	MQTTAsync_setTraceCallback(handleTrace);
 	getopts(argc, argv);
+
+	if (options.same_port)
+	{ /* point all the test connection variants at the single base connection */
+		if (options.hostname != NULL)
+		{ /* rebuild the base connection now that start_port is final (getopts is order-dependent) */
+			const char* prefix = options.websockets ? "wss" : (options.quic ? "quic" : "ssl");
+			sprintf(options.connection, "%s://%s:%d", prefix, options.hostname, options.start_port);
+		}
+		strcpy(options.mutual_auth_connection, options.connection);
+		strcpy(options.nocert_mutual_auth_connection, options.connection);
+		strcpy(options.server_auth_connection, options.connection);
+		strcpy(options.anon_connection, options.connection);
+		strcpy(options.psk_connection, options.connection);
+		printf("same_port: using %s for all tests\n", options.connection);
+	}
 
 	if (options.test_no == 0)
 	{ /* run all the tests */

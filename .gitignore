@@ -9,3 +9,4 @@ _build/
 .cache
 build-quic/
 compile_commands.json
+.DS_Store

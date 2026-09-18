@@ -1260,11 +1260,6 @@ ENDIF()
 
 IF (PAHO_WITH_QUIC)
 	IF (PAHO_BUILD_SHARED)
-        ADD_DEFINITIONS(-DMSQUIC=1)
-        # Set appropriate include and link directories
-        include_directories(${CMAKE_BINARY_DIR}/external/msquic/src/inc)
-        link_directories(${CMAKE_BINARY_DIR}/external/msquic/src/msquic)
-
 		ADD_EXECUTABLE(
 			test9000
 			test5.c
