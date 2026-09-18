@@ -27,13 +27,17 @@ Status legend: [ ] open, [x] fixed
     Verified: QUIC smoke ×3, TLS/WSS smoke against TDMQ, and local TLS
     orderly-shutdown test (failure callback in ~1s, no busy loop).
 
-- [ ] **2. Inverted `#if !defined(WITH_OPENSSL_QUIC)` guard breaks builds against OpenSSL < 3.2**
+- [x] **2. Inverted `#if !defined(WITH_OPENSSL_QUIC)` guard breaks builds against OpenSSL < 3.2**
   - `src/SSLSocket.c:596-601`
   - When built *without* QUIC support (OpenSSL 1.1/3.0), the `MQTT_SSL_VERSION_QUIC`
     case referencing `OSSL_QUIC_client_thread_method()` *is* compiled, but that
     symbol does not exist before OpenSSL 3.2 → compile failure. When QUIC *is*
     enabled the case is excluded (harmless, `quic_mode` branch handles it).
   - Fix: invert guard to `#if defined(WITH_OPENSSL_QUIC)` or delete the case.
+  - **Fixed 2026-09-18**: guard inverted. `OSSL_QUIC_client_thread_method` is now
+    only referenced when `WITH_OPENSSL_QUIC` is defined (which requires
+    OpenSSL >= 3.2). Verified: QUIC-on and QUIC-off (`PAHO_WITH_QUIC=OFF`)
+    builds both compile; QUIC smoke test passes.
 
 - [ ] **3. NULL `sslopts` dereference for `quic://` connects without SSL options**
   - `src/MQTTAsyncUtils.c:2943-2946`

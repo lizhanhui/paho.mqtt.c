@@ -593,7 +593,7 @@ int SSLSocket_createContext(networkHandles* net, MQTTClient_SSLOptions* opts)
 			net->ctx = SSL_CTX_new(TLSv1_2_client_method());
 			break;
 #endif
-#if !defined(WITH_OPENSSL_QUIC)
+#if defined(WITH_OPENSSL_QUIC)
 		case MQTT_SSL_VERSION_QUIC:
 			Log(TRACE_MINIMUM, -1, "Creating QUIC context");
 			net->ctx = SSL_CTX_new(OSSL_QUIC_client_thread_method());
