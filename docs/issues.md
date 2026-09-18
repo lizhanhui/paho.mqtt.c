@@ -141,10 +141,14 @@ Status legend: [ ] open, [x] fixed
     Verified: QUIC connect trace has no TCP_NODELAY/NOSIGPIPE errors; QUIC
     smoke, TLS smoke, and TCP basic test all pass.
 
-- [ ] **9. `quic://` default port is 1883**
+- [x] **9. `quic://` default port is 1883**
   - `src/MQTTProtocolOut.c:270`
   - Port-less `quic://host` targets UDP/1883. Choose a secure default (e.g. 8883)
     or document.
+  - **Fixed 2026-09-18**: new `QUIC_DEFAULT_PORT 14567` (`src/MQTTProtocolOut.h`)
+    used for `ssl == 2` connects — 14567 is the MQTT-over-QUIC port used by both
+    EMQX and Tencent TDMQ. Documented in README. Verified: port-less
+    `quic://<host>` connects to TDMQ successfully.
 
 - [ ] **10. `SSL_set_blocking_mode(ssl, 0)` applied to non-QUIC TLS connections**
   - `src/MQTTProtocolOut.c:318-320`

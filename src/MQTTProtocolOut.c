@@ -275,7 +275,7 @@ int MQTTProtocol_connect(const char* address, Clients* aClient, int unixsock, in
 
 #if defined(OPENSSL) && defined(WITH_OPENSSL_QUIC)
 	else if (ssl == 2) {
-		addr_len = MQTTProtocol_addressPort(address, &port, NULL, MQTT_DEFAULT_PORT);
+		addr_len = MQTTProtocol_addressPort(address, &port, NULL, QUIC_DEFAULT_PORT);
 		aClient->net.quic_mode = QUIC_MODE_ONLY;
 #if defined(__GNUC__) && defined(__linux__)
 		rc = Socket_dgram_new(address, addr_len, port, &(aClient->net.socket), timeout);
