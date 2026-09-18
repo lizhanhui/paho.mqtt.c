@@ -5,3 +5,7 @@
 *.pyc
 /build.paho
 .vscode/
+_build/
+.cache
+build-quic/
+compile_commands.json
