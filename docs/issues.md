@@ -150,11 +150,15 @@ Status legend: [ ] open, [x] fixed
     EMQX and Tencent TDMQ. Documented in README. Verified: port-less
     `quic://<host>` connects to TDMQ successfully.
 
-- [ ] **10. `SSL_set_blocking_mode(ssl, 0)` applied to non-QUIC TLS connections**
+- [x] **10. `SSL_set_blocking_mode(ssl, 0)` applied to non-QUIC TLS connections**
   - `src/MQTTProtocolOut.c:318-320`
   - QUIC-only API called unconditionally on every successful TLS handshake in
     QUIC-enabled builds (fails harmlessly for TLS).
   - Fix: guard with `net->quic_mode > QUIC_MODE_NONE`.
+  - **Fixed 2026-09-18**: guarded as recommended (`quic_mode` is reset to
+    `QUIC_MODE_NONE` per connect attempt and set to `QUIC_MODE_ONLY` only for
+    `ssl == 2`, so the guard is exact). Verified: QUIC smoke (port-less URI),
+    TLS smoke, and MQTTAsync-over-TLS test9000 #8 all pass.
 
 ## Server-side (rocketmq-mqtt) observations affecting rollout
 

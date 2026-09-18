@@ -323,7 +323,10 @@ int MQTTProtocol_connect(const char* address, Clients* aClient, int unixsock, in
 				if (sslrc == 1) /* success */
 				{
 #if defined(WITH_OPENSSL_QUIC)
-					SSL_set_blocking_mode(aClient->net.ssl, 0);
+					/* SSL_set_blocking_mode is a QUIC-only API - don't call it
+					   for regular TLS connections */
+					if (aClient->net.quic_mode > QUIC_MODE_NONE)
+						SSL_set_blocking_mode(aClient->net.ssl, 0);
 #endif
 					rc = 0;
 				}
