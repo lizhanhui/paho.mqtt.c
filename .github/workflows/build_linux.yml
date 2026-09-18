@@ -61,6 +61,7 @@ jobs:
       - name: Start test broker for Quic
         if: matrix.quic
         run: |
+          sh test/ssl/emqx/etc/certs/gen.sh
           docker run -d --name emqx \
           -v `pwd`/test/ssl/emqx/etc/certs:/opt/emqx/etc/certs \
           -v `pwd`/test/emqx.conf:/opt/emqx/etc/emqx.conf \

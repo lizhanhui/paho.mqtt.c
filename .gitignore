@@ -10,3 +10,7 @@ _build/
 build-quic/
 compile_commands.json
 .DS_Store
+# QUIC test certificates are generated on demand by test/ssl/emqx/etc/certs/gen.sh
+test/ssl/emqx/etc/certs/*.pem
+test/ssl/emqx/etc/certs/*.csr
+test/ssl/emqx/etc/certs/*.srl

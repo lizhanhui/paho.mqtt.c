@@ -1,1 +1,5 @@
-Place your SSL/TLS Certificates here.
+QUIC test certificates are generated on demand — run gen.sh in this
+directory (the CMake configure step does this automatically when
+PAHO_WITH_QUIC is enabled and the certificates are missing).
+
+Do not commit the generated *.pem files; they are git-ignored.

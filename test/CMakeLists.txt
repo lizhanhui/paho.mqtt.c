@@ -1259,6 +1259,19 @@ if(PAHO_WITH_SSL OR PAHO_WITH_LIBRESSL)
 ENDIF()
 
 IF (PAHO_WITH_QUIC)
+	# QUIC test certificates are generated on demand (never committed)
+	IF (NOT EXISTS ${EMQX_CERTDIR}/cacert.pem)
+		message(STATUS "Generating QUIC test certificates with ${EMQX_CERTDIR}/gen.sh")
+		execute_process(
+			COMMAND sh gen.sh
+			WORKING_DIRECTORY ${EMQX_CERTDIR}
+			RESULT_VARIABLE gen_certs_result
+		)
+		IF (NOT gen_certs_result EQUAL 0)
+			message(WARNING "QUIC test certificate generation failed; run ${EMQX_CERTDIR}/gen.sh manually")
+		ENDIF ()
+	ENDIF ()
+
 	IF (PAHO_BUILD_SHARED)
 		ADD_EXECUTABLE(
 			test9000

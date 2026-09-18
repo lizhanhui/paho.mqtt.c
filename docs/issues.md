@@ -227,13 +227,27 @@ Review repeated at `094c84b` on 2026-09-18. These issues remain open.
     plain samples with zero QUIC targets; SSL build still builds all three QUIC
     samples; quic publish sample passes against TDMQ.
 
-- [ ] **13. Bundled QUIC test certificates are expired**
+- [x] **13. Bundled QUIC test certificates are expired**
   - `test/ssl/emqx/etc/certs/cert.pem`
   - `test/ssl/emqx/etc/certs/client-cert.pem`
   - Both certificates expired on 2026-02-12. `openssl verify` now rejects them,
     so positive certificate-authentication tests cannot validate QUIC.
+  - Usage found: CTest test9000 entries (`EMQX_CERTDIR` paths in
+    `test/CMakeLists.txt`) and the CI EMQX container (`build_linux.yml` mounts
+    the certs dir + `test/emqx.conf`). Not used by samples.
   - Fix: replace or generate maintained test certificates and add an expiry
     check to CI.
+  - **Fixed 2026-09-18** (on-demand generation, no committed keys): new
+    `test/ssl/emqx/etc/certs/gen.sh` generates CA + server (CN=localhost with
+    SANs) + client certs; committed PEMs removed and git-ignored; CMake
+    configure auto-runs gen.sh when `PAHO_WITH_QUIC` is on and certs are
+    missing; CI `build_linux.yml` runs gen.sh before starting EMQX.
+    Verified: gen.sh output chains verify (`openssl verify` OK, leaf expiry
+    +825 days), configure-time auto-generation works.
+  - **Deferred**: full test9000 run against the local EMQX docker rig — the
+    available docker daemon runs on a remote Linux host and cannot bind-mount
+    local macOS paths. Re-verify by running `ctest -R test9000` in CI (which
+    now generates fresh certs) or on a host with local docker.
 
 - [ ] **14. QUIC read failures are classified without `SSL_get_error()`**
   - `src/SSLSocket.c:951-972, 1010-1033`
