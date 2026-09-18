@@ -72,6 +72,10 @@ int SSLSocket_createContext(networkHandles* net, MQTTClient_SSLOptions* opts);
 void SSLSocket_destroyContext(networkHandles* net);
 void SSLSocket_addPendingRead(SOCKET sock);
 
+#if defined(WITH_OPENSSL_QUIC)
+static int SSLSocket_is_quic_closed(SSL* ssl);
+#endif
+
 /* 1 ~ we are responsible for initializing openssl; 0 ~ openssl init is done externally */
 static int handle_openssl_init = 1;
 static ssl_mutex_type* sslLocks = NULL;
@@ -549,6 +553,15 @@ int SSLSocket_createContext(networkHandles* net, MQTTClient_SSLOptions* opts)
 	int rc = 1;
 
 	FUNC_ENTRY;
+
+#if defined(WITH_OPENSSL_QUIC)
+	if (net->quic_mode > QUIC_MODE_NONE)
+	{
+		Log(TRACE_MINIMUM, -1, "Creating QUIC context");
+		net->ctx = SSL_CTX_new(OSSL_QUIC_client_thread_method());
+	}
+#endif
+
 	if (net->ctx == NULL)
 	{
 #if (OPENSSL_VERSION_NUMBER >= 0x10100000L)
@@ -578,6 +591,12 @@ int SSLSocket_createContext(networkHandles* net, MQTTClient_SSLOptions* opts)
 #if defined(SSL_OP_NO_TLSv1_2) && !defined(OPENSSL_NO_TLS1)
 		case MQTT_SSL_VERSION_TLS_1_2:
 			net->ctx = SSL_CTX_new(TLSv1_2_client_method());
+			break;
+#endif
+#if !defined(WITH_OPENSSL_QUIC)
+		case MQTT_SSL_VERSION_QUIC:
+			Log(TRACE_MINIMUM, -1, "Creating QUIC context");
+			net->ctx = SSL_CTX_new(OSSL_QUIC_client_thread_method());
 			break;
 #endif
 		default:
@@ -735,6 +754,20 @@ int SSLSocket_setSocketForSSL(networkHandles* net, MQTTClient_SSLOptions* opts,
 			goto exit;
 		}
 
+#if defined(WITH_OPENSSL_QUIC)
+	if (net->quic_mode > QUIC_MODE_NONE)
+	{
+		/* ALPN is mandtory for QUIC */
+		static const unsigned char alpn[] = {4, 'm', 'q', 't', 't'};
+		if ((rc = SSL_set_alpn_protos(net->ssl, alpn, sizeof(alpn)))) {
+			/* Note: SSL_set_alpn_protos returns 1 for failure. */
+			SSLSocket_error("SSL_set_quic_alpn", net->ssl, net->socket, rc, NULL, NULL);
+		}
+		// Client side QUIC
+		SSL_set_connect_state(net->ssl);
+	}
+#endif
+		
 		/* Log all ciphers available to the SSL sessions (loaded in ctx) */
 		for (i = 0; ;i++)
 		{
@@ -799,6 +832,7 @@ int SSLSocket_connect(SSL* ssl, SOCKET sock, const char* hostname, int verify, i
 				Socket_addPendingWrite(sock);
 				break;
 			default:
+				rc = error;
 				Socket_clearPendingWrite(sock);
 				break;
 			}
@@ -883,8 +917,16 @@ int SSLSocket_getch(SSL* ssl, SOCKET socket, char* c)
 			SocketBuffer_interrupted(socket, 0);
 		}
 	}
-	else if (rc == 0)
-		rc = SOCKET_ERROR; 	/* The return value from recv is 0 when the peer has performed an orderly shutdown. */
+#if defined(WITH_OPENSSL_QUIC)
+	else if (rc == 0) {
+		if (!SSLSocket_is_quic_closed(ssl))
+		{
+			rc = TCPSOCKET_INTERRUPTED;
+		}
+		else
+			rc = SOCKET_ERROR; 	/* The return value from recv is 0 when the peer has performed an orderly shutdown. */
+	}
+#endif
 	else if (rc == 1)
 	{
 		SocketBuffer_queueChar(socket, *c);
@@ -933,8 +975,15 @@ char *SSLSocket_getdata(SSL* ssl, SOCKET socket, size_t bytes, size_t* actual_le
 		}
 		else if (*rc == 0) /* rc 0 means the other end closed the socket */
 		{
-			buf = NULL;
-			goto exit;
+#if defined(WITH_OPENSSL_QUIC)
+			if (!SSLSocket_is_quic_closed(ssl))
+				*rc = TCPSOCKET_INTERRUPTED;
+			else
+#endif
+			{
+				buf = NULL;
+				goto exit;
+			}
 		}
 		else
 			*actual_len += *rc;
@@ -1030,8 +1079,13 @@ int SSLSocket_putdatas(SSL* ssl, SOCKET socket, char* buf0, size_t buf0len, Pack
 		rc = TCPSOCKET_COMPLETE;
 	else
 	{
+#if defined(WITH_OPENSSL_QUIC)
+		if (rc == 0 && SSLSocket_is_quic_closed(ssl))
+			{
+				rc = SOCKET_ERROR;
+			}
+#endif
 		sslerror = SSLSocket_error("SSL_write", ssl, socket, rc, NULL, NULL);
-
 		if (sslerror == SSL_ERROR_WANT_WRITE)
 		{
 			SOCKET* sockmem = (SOCKET*)malloc(sizeof(SOCKET));
@@ -1140,6 +1194,22 @@ int SSLSocket_abortWrite(pending_writes* pw)
 
 	FUNC_ENTRY;
 	free(pw->iovecs[0].iov_base);
+	FUNC_EXIT_RC(rc);
+	return rc;
+}
+#endif
+
+#if defined(WITH_OPENSSL_QUIC)
+// Return 0 if  QUIC connection is closed, and
+// always return 0 if it is not QUIC connection
+static int SSLSocket_is_quic_closed(SSL* ssl)
+{
+	int rc = 0;
+
+	FUNC_ENTRY;
+	SSL_CONN_CLOSE_INFO close_info = {0};
+
+	rc = SSL_get_conn_close_info(ssl, &close_info, sizeof(SSL_CONN_CLOSE_INFO));
 	FUNC_EXIT_RC(rc);
 	return rc;
 }
