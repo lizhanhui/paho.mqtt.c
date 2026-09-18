@@ -126,7 +126,7 @@ Status legend: [ ] open, [x] fixed
     error path and useful for debugging, just not at minimum level).
     Verified: build clean, QUIC smoke passes.
 
-- [ ] **8. UDP socket gets TCP hints and TCP-only setsockopts**
+- [x] **8. UDP socket gets TCP hints and TCP-only setsockopts**
   - `src/Socket.c:1398-1401, 1496-1510`
   - getaddrinfo hints hardcode `SOCK_STREAM`/`IPPROTO_TCP`; `TCP_NODELAY`/
     `SO_NOSIGPIPE` are set on UDP sockets ("Could not set TCP_NODELAY for socket"
@@ -134,6 +134,12 @@ Status legend: [ ] open, [x] fixed
     is marked `@TODO: maybe not needed` and applies to TCP sockets too.
   - Fix: use type-appropriate hints; scope TCP setsockopts to `SOCK_STREAM`;
     scope/remove the fcntl.
+  - **Fixed 2026-09-18**: hints now set `ai_socktype`/`ai_protocol` from the
+    requested socket type; `SO_NOSIGPIPE`/`TCP_NODELAY` scoped to
+    `type == SOCK_STREAM`; the `@TODO` fcntl block removed as redundant —
+    `Socket_addSocket` already calls `Socket_setnonblocking` for every socket.
+    Verified: QUIC connect trace has no TCP_NODELAY/NOSIGPIPE errors; QUIC
+    smoke, TLS smoke, and TCP basic test all pass.
 
 - [ ] **9. `quic://` default port is 1883**
   - `src/MQTTProtocolOut.c:270`

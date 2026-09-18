@@ -1396,11 +1396,13 @@ static int new(int type, const char* addr, size_t addr_len, int port, SOCKET* so
 	sa_family_t family = AF_INET;
 #endif
 	struct addrinfo *result = NULL;
-	struct addrinfo hints = {AI_ADDRCONFIG, AF_UNSPEC, SOCK_STREAM, IPPROTO_TCP, 0, NULL, NULL, NULL};
+	struct addrinfo hints = {AI_ADDRCONFIG, AF_UNSPEC, 0, 0, 0, NULL, NULL, NULL};
 
 	Log(TRACE_MIN, -1, "New socket for %s", type == SOCK_STREAM ? "TCP" : "UDP");
 	FUNC_ENTRY;
 	*sock = SOCKET_ERROR;
+	hints.ai_socktype = type;
+	hints.ai_protocol = (type == SOCK_STREAM) ? IPPROTO_TCP : IPPROTO_UDP;
 	memset(&address6, '\0', sizeof(address6));
 
 	if (addr[0] == '[')
@@ -1495,6 +1497,8 @@ static int new(int type, const char* addr, size_t addr_len, int port, SOCKET* so
 			rc = Socket_error("socket", *sock);
 		else
 		{
+		if (type == SOCK_STREAM)
+		{
 #if defined(NOSIGPIPE)
 			{
 				int opt = 1;
@@ -1511,6 +1515,7 @@ static int new(int type, const char* addr, size_t addr_len, int port, SOCKET* so
 					Log(LOG_ERROR, -1, "Could not set TCP_NODELAY for socket %d", *sock);
 			}
 #endif
+		}
 /*#define SMALL_TCP_BUFFER_TESTING
   This section sets the TCP send buffer to a small amount to provoke TCPSOCKET_INTERRUPTED
 	return codes from send, for testing only!
@@ -1536,14 +1541,6 @@ static int new(int type, const char* addr, size_t addr_len, int port, SOCKET* so
 				else
 					rc = connect(*sock, (struct sockaddr*)&address6, sizeof(address6));
 	#endif
-
-// @TODO: maybe not needed
-#if defined(WITH_OPENSSL_QUIC)
-				if (fcntl(*sock, F_SETFL, O_NONBLOCK) < 0) {
-					Log(TRACE_MINIMUM,  -1,  "cannot make socket %d nonblocking\n", *sock);
-					goto exit;
-				}
-#endif
 
 				if (rc == SOCKET_ERROR)
 					rc = Socket_error("connect", *sock);
