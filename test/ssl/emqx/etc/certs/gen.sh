@@ -34,6 +34,8 @@ openssl x509 -req -in client.csr -CA cacert.pem -CAkey cakey.pem -CAcreateserial
 
 rm -f server.csr client.csr cacert.srl untrusted-cacert.srl ext.cnf
 
+chmod 644 *.pem
+
 echo "Generated QUIC test certificates in $(pwd):"
 openssl x509 -in cert.pem -noout -subject -enddate
 openssl x509 -in client-cert.pem -noout -subject -enddate
