@@ -1321,6 +1321,13 @@ static int MQTTAsync_processCommand(void)
 				{
 					serverURI = command->client->serverURIs[command->command.details.conn.currentURI];
 
+					/* reset per-URI transport flags before parsing the scheme -
+					   they must reflect the current URI, not a previous one
+					   (e.g. quic:// -> tcp:// failover must not keep ssl == 2) */
+					command->client->ssl = 0;
+					command->client->websocket = 0;
+					command->client->unixsock = 0;
+
 					if (strncmp(URI_TCP, serverURI, strlen(URI_TCP)) == 0)
 						serverURI += strlen(URI_TCP);
 					else if (strncmp(URI_MQTT, serverURI, strlen(URI_MQTT)) == 0)
@@ -1359,6 +1366,14 @@ static int MQTTAsync_processCommand(void)
 						command->client->ssl = 1;
 						command->client->websocket = 1;
 					}
+#if defined(WITH_OPENSSL_QUIC)
+					else if (strncmp(URI_QUIC, serverURI, strlen(URI_QUIC)) == 0)
+					{
+						serverURI += strlen(URI_QUIC);
+						command->client->ssl = 2;
+					}
+#endif
+
 #endif
 				}
 			}
@@ -1392,8 +1407,10 @@ static int MQTTAsync_processCommand(void)
 #endif
 #endif
 
-			if (command->client->c->connect_state == NOT_IN_PROGRESS)
+			if (command->client->c->connect_state == NOT_IN_PROGRESS) {
+				Log(TRACE_MED, -1, "Connect state is NOT_IN_PROGRESS for client %s", command->client->c->clientID);
 				rc = SOCKET_ERROR;
+			}
 
 			/* if the TCP connect is pending, then we must call select to determine when the connect has completed,
 			which is indicated by the socket being ready *either* for reading *or* writing.  The next couple of lines
@@ -2899,6 +2916,13 @@ static int MQTTAsync_connecting(MQTTAsyncs* m)
 			serverURI += strlen(URI_WSS);
 			default_port = WSS_DEFAULT_PORT;
 		}
+#if defined(WITH_OPENSSL_QUIC)
+		else if (strncmp(URI_QUIC, serverURI, strlen(URI_QUIC)) == 0)
+		{
+			serverURI += strlen(URI_QUIC);
+			default_port = QUIC_DEFAULT_PORT;
+		}
+#endif
 #endif
 	}
 
@@ -2922,13 +2946,18 @@ static int MQTTAsync_connecting(MQTTAsyncs* m)
 			size_t hostname_len;
 			int setSocketForSSLrc = 0;
 
-			if (m->c->net.https_proxy) {
+			if (m->c->net.https_proxy && m->ssl != 2) {
 				m->c->connect_state = PROXY_CONNECT_IN_PROGRESS;
 				if ((rc = Proxy_connect( &m->c->net, 1, serverURI)) == SOCKET_ERROR )
 					goto exit;
 			}
 
 			hostname_len = MQTTProtocol_addressPort(serverURI, &port, NULL, default_port);
+
+			/* Do not overwrite the caller's sslVersion with MQTT_SSL_VERSION_QUIC.
+			   QUIC context selection is driven by net.quic_mode; mutating
+			   sslVersion here would stick across serverURIs failover and drop
+			   a TLS 1.3-only preference on a later ssl:// URI. */
 			setSocketForSSLrc = SSLSocket_setSocketForSSL(&m->c->net, m->c->sslopts,
 					serverURI, hostname_len);
 

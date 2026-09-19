@@ -228,18 +228,38 @@ install(
     ${CMAKE_INSTALL_INCLUDEDIR}
 )
 
+# PAHO_QUIC_ENABLED reflects *effective* QUIC support (requested AND the TLS
+# library provides the QUIC API), as opposed to the requested PAHO_WITH_QUIC.
+# Libraries, tests and samples must gate on PAHO_QUIC_ENABLED.
+set(PAHO_QUIC_ENABLED FALSE)
+
 if(PAHO_WITH_SSL OR PAHO_WITH_LIBRESSL)
   if(PAHO_WITH_LIBRESSL)
     find_package(LibreSSL REQUIRED)
     set(SSL_LIBRARY_NAME LibreSSL)
     set(SSL_INCLUDE_DIR ${LIBRESSL_INCLUDE_DIR})
     set(SSL_ROOT_DIR ${LIBRESSL_ROOT_DIR})
+    if (PAHO_WITH_QUIC)
+      message(WARNING "PAHO_WITH_QUIC requires OpenSSL >= 3.2; LibreSSL does not support QUIC - QUIC support disabled")
+    endif()
   else()
     find_package(OpenSSL REQUIRED)
+
+    if (PAHO_WITH_QUIC AND NOT "${OPENSSL_VERSION}" VERSION_LESS "3.2")
+      set(COMPILE_WITH_QUIC "WITH_OPENSSL_QUIC=1")
+      set(PAHO_QUIC_ENABLED TRUE)
+    else()
+      set(COMPILE_WITH_QUIC "")
+      if (PAHO_WITH_QUIC)
+        message(WARNING "PAHO_WITH_QUIC requires OpenSSL >= 3.2 (found ${OPENSSL_VERSION}) - QUIC support disabled")
+      endif()
+    endif()
+
     set(SSL_LIBRARY_NAME OpenSSL)
     set(SSL_INCLUDE_DIR ${OPENSSL_INCLUDE_DIR})
     set(SSL_ROOT_DIR ${OPENSSL_ROOT_DIR})
   endif()
+  set(PAHO_QUIC_ENABLED ${PAHO_QUIC_ENABLED} PARENT_SCOPE)
   message(STATUS "Using ${SSL_LIBRARY_NAME} with headers at ${SSL_INCLUDE_DIR}")
 
   if(PAHO_BUILD_SHARED)
@@ -249,7 +269,7 @@ if(PAHO_WITH_SSL OR PAHO_WITH_LIBRESSL)
     target_include_directories(common_ssl_obj PUBLIC ${SSL_INCLUDE_DIR})
 
     set_property(TARGET common_ssl_obj PROPERTY POSITION_INDEPENDENT_CODE ON)
-    target_compile_definitions(common_ssl_obj PRIVATE OPENSSL=1 PAHO_MQTT_EXPORTS=1)
+    target_compile_definitions(common_ssl_obj PRIVATE OPENSSL=1 ${COMPILE_WITH_QUIC} PAHO_MQTT_EXPORTS=1)
     
     add_library(paho-mqtt3cs SHARED
       $<TARGET_OBJECTS:common_ssl_obj>
@@ -269,7 +289,7 @@ if(PAHO_WITH_SSL OR PAHO_WITH_LIBRESSL)
     set_target_properties(paho-mqtt3cs paho-mqtt3as PROPERTIES
       VERSION ${PROJECT_VERSION}
       SOVERSION ${PROJECT_VERSION_MAJOR}
-      COMPILE_DEFINITIONS "OPENSSL=1;PAHO_MQTT_EXPORTS=1"
+      COMPILE_DEFINITIONS "OPENSSL=1;${COMPILE_WITH_QUIC};PAHO_MQTT_EXPORTS=1"
     )
 
     if(${CMAKE_SYSTEM_NAME} STREQUAL "Darwin")
@@ -317,7 +337,7 @@ if(PAHO_WITH_SSL OR PAHO_WITH_LIBRESSL)
     target_include_directories(common_ssl_obj_static PUBLIC ${SSL_INCLUDE_DIR})
 
     set_property(TARGET common_ssl_obj_static PROPERTY POSITION_INDEPENDENT_CODE ON)
-    target_compile_definitions(common_ssl_obj_static PRIVATE OPENSSL=1 PAHO_MQTT_STATIC=1)
+    target_compile_definitions(common_ssl_obj_static PRIVATE OPENSSL=1 ${COMPILE_WITH_QUIC} PAHO_MQTT_STATIC=1)
     
     add_library(paho-mqtt3cs-static STATIC
       $<TARGET_OBJECTS:common_ssl_obj_static>
@@ -337,7 +357,7 @@ if(PAHO_WITH_SSL OR PAHO_WITH_LIBRESSL)
     set_target_properties(paho-mqtt3cs-static paho-mqtt3as-static PROPERTIES
       VERSION ${PROJECT_VERSION}
       SOVERSION ${PROJECT_VERSION_MAJOR}
-      COMPILE_DEFINITIONS "OPENSSL=1;PAHO_MQTT_STATIC=1"
+      COMPILE_DEFINITIONS "OPENSSL=1;${COMPILE_WITH_QUIC};PAHO_MQTT_STATIC=1"
     )
 
     if(NOT WIN32)

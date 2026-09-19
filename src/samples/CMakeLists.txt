@@ -89,6 +89,27 @@ if(PAHO_BUILD_SHARED)
     RUNTIME DESTINATION ${CMAKE_INSTALL_BINDIR}
     LIBRARY DESTINATION ${CMAKE_INSTALL_LIBDIR}
   )
+
+  # QUIC samples need the SSL-enabled asynchronous library with QUIC support
+  if(PAHO_QUIC_ENABLED)
+    foreach(TARGET MQTTAsync_quic_publish MQTTAsync_quic_subscribe MQTTAsync_quic_fallback)
+      add_executable(${TARGET} ${TARGET}.c)
+      set_target_properties(${TARGET} PROPERTIES
+        COMPILE_DEFINITIONS "PAHO_MQTT_IMPORTS=1"
+      )
+      target_link_libraries(${TARGET} paho-mqtt3as)
+    endforeach()
+
+    install(
+      TARGETS
+        MQTTAsync_quic_publish
+        MQTTAsync_quic_subscribe
+        MQTTAsync_quic_fallback
+
+      RUNTIME DESTINATION ${CMAKE_INSTALL_BINDIR}
+      LIBRARY DESTINATION ${CMAKE_INSTALL_LIBDIR}
+    )
+  endif()
 endif()
 
 if(PAHO_BUILD_STATIC)

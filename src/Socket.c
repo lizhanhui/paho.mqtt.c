@@ -68,6 +68,12 @@ int Socket_continueWrite(SOCKET socket);
 char* Socket_getaddrname(struct sockaddr* sa, SOCKET sock);
 int Socket_abortWrite(SOCKET socket);
 
+#if defined(__GNUC__) && defined(__linux__)
+static int new(int type, const char* addr, size_t addr_len, int port, SOCKET* sock, long timeout);
+#else
+static int new(int type, const char* addr, size_t addr_len, int port, SOCKET* sock);
+#endif
+
 #if defined(_WIN32)
 #define iov_len len
 #define iov_base buf
@@ -799,9 +805,12 @@ SOCKET Socket_getReadySocket(int more_work, int timeout, mutex_type mutex, int* 
 			goto exit; /* no work to do */
 		}
 
-		/* Check pending write set for writeable sockets */
+		/* Check pending write set for writeable sockets.  Also retry when
+		   writes are already queued: QUIC SSL_write can return WANT_READ,
+		   which is independent of UDP POLLOUT. */
 		rc1 = poll(mod_s.saved.fds_write, mod_s.saved.nfds, 0);
-		if (rc1 > 0 && Socket_continueWrites(&sock, mutex) == SOCKET_ERROR)
+		if ((rc1 > 0 || (mod_s.write_pending && mod_s.write_pending->count > 0)) &&
+				Socket_continueWrites(&sock, mutex) == SOCKET_ERROR)
 		{
 			*rc = SOCKET_ERROR;
 			goto exit;
@@ -1331,6 +1340,27 @@ exit:
 
 
 /**
+ *  Create a new socket and UDP connect to an address/port
+ *  @param addr the address string
+ *  @param assr_len the length of the address string
+ *  @param port the UDP port
+ *  @param sock returns the new socket
+ *  @param timeout the timeout in milliseconds
+ *  @return completion code 0=good, SOCKET_ERROR=fail
+ */
+#if defined(__GNUC__) && defined(__linux__)
+int Socket_dgram_new(const char* addr, size_t addr_len, int port, SOCKET* sock, long timeout)
+{
+	return new(SOCK_DGRAM, addr, addr_len, port, sock, timeout);
+}
+#else
+int Socket_dgram_new(const char* addr, size_t addr_len, int port, SOCKET* sock)
+{
+	return new(SOCK_DGRAM, addr, addr_len, port, sock);
+}
+#endif
+
+/**
  *  Create a new socket and TCP connect to an address/port
  *  @param addr the address string
  *  @param assr_len the length of the address string
@@ -1341,11 +1371,22 @@ exit:
  */
 #if defined(__GNUC__) && defined(__linux__)
 int Socket_new(const char* addr, size_t addr_len, int port, SOCKET* sock, long timeout)
+{
+	return new(SOCK_STREAM, addr, addr_len, port, sock, timeout);
+}
 #else
 int Socket_new(const char* addr, size_t addr_len, int port, SOCKET* sock)
+{
+	return new(SOCK_STREAM, addr, addr_len, port, sock);
+}
+#endif
+
+#if defined(__GNUC__) && defined(__linux__)
+static int new(int type, const char* addr, size_t addr_len, int port, SOCKET* sock, long timeout)
+#else
+static int new(int type, const char* addr, size_t addr_len, int port, SOCKET* sock)
 #endif
 {
-	int type = SOCK_STREAM;
 	char *addr_mem;
 	struct sockaddr_in address;
 #if defined(AF_INET6)
@@ -1358,10 +1399,13 @@ int Socket_new(const char* addr, size_t addr_len, int port, SOCKET* sock)
 	sa_family_t family = AF_INET;
 #endif
 	struct addrinfo *result = NULL;
-	struct addrinfo hints = {AI_ADDRCONFIG, AF_UNSPEC, SOCK_STREAM, IPPROTO_TCP, 0, NULL, NULL, NULL};
+	struct addrinfo hints = {AI_ADDRCONFIG, AF_UNSPEC, 0, 0, 0, NULL, NULL, NULL};
 
+	Log(TRACE_MIN, -1, "New socket for %s", type == SOCK_STREAM ? "TCP" : "UDP");
 	FUNC_ENTRY;
 	*sock = SOCKET_ERROR;
+	hints.ai_socktype = type;
+	hints.ai_protocol = (type == SOCK_STREAM) ? IPPROTO_TCP : IPPROTO_UDP;
 	memset(&address6, '\0', sizeof(address6));
 
 	if (addr[0] == '[')
@@ -1456,6 +1500,8 @@ int Socket_new(const char* addr, size_t addr_len, int port, SOCKET* sock)
 			rc = Socket_error("socket", *sock);
 		else
 		{
+		if (type == SOCK_STREAM)
+		{
 #if defined(NOSIGPIPE)
 			{
 				int opt = 1;
@@ -1472,6 +1518,7 @@ int Socket_new(const char* addr, size_t addr_len, int port, SOCKET* sock)
 					Log(LOG_ERROR, -1, "Could not set TCP_NODELAY for socket %d", *sock);
 			}
 #endif
+		}
 /*#define SMALL_TCP_BUFFER_TESTING
   This section sets the TCP send buffer to a small amount to provoke TCPSOCKET_INTERRUPTED
 	return codes from send, for testing only!
@@ -1497,6 +1544,7 @@ int Socket_new(const char* addr, size_t addr_len, int port, SOCKET* sock)
 				else
 					rc = connect(*sock, (struct sockaddr*)&address6, sizeof(address6));
 	#endif
+
 				if (rc == SOCKET_ERROR)
 					rc = Socket_error("connect", *sock);
 				if (rc == EINPROGRESS || rc == EWOULDBLOCK)
@@ -1762,15 +1810,36 @@ int Socket_continueWrites(SOCKET* sock, mutex_type mutex)
 		int socket = *(int*)(curpending->content);
 		int rc = 0;
 #if defined(USE_SELECT)
-
-		if (FD_ISSET(socket, pwset) && ((rc = Socket_continueWrite(socket)) != 0))
+		int ready = FD_ISSET(socket, pwset);
+#if defined(OPENSSL)
+		/* QUIC writes can stall on WANT_READ; retry when the socket is readable too */
+		if (!ready)
+			ready = FD_ISSET(socket, &(mod_s.rset));
+#endif
+		if (ready && ((rc = Socket_continueWrite(socket)) != 0))
 #else
 		struct pollfd* fd;
+		int ready = 0;
 
 		/* find the socket in the fds structure */
-		fd = bsearch(&socket, mod_s.saved.fds_write, (size_t)mod_s.saved.nfds, sizeof(mod_s.saved.fds_write[0]), cmpsockfds);
-
-		if ((fd->revents & POLLOUT) && ((rc = Socket_continueWrite(socket)) != 0))
+		if (mod_s.saved.fds_write)
+			fd = bsearch(&socket, mod_s.saved.fds_write, (size_t)mod_s.saved.nfds, sizeof(mod_s.saved.fds_write[0]), cmpsockfds);
+		else
+			fd = NULL;
+		if (fd)
+			ready = (fd->revents & POLLOUT) != 0;
+#if defined(OPENSSL)
+		/* Stream flow control is independent of datagram POLLOUT.  Retry any
+		   queued SSL write so WANT_READ can be cleared by SSL_handle_events /
+		   SSL_write. */
+		if (!ready)
+		{
+			pending_writes* pw = SocketBuffer_getWrite(socket);
+			if (pw && pw->ssl)
+				ready = 1;
+		}
+#endif
+		if (ready && ((rc = Socket_continueWrite(socket)) != 0))
 #endif
 		{
 			if (!SocketBuffer_writeComplete(socket))

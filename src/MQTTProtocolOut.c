@@ -144,6 +144,12 @@ int MQTTProtocol_connect(const char* address, Clients* aClient, int unixsock, in
 	FUNC_ENTRY;
 	aClient->good = 1;
 
+#if defined(OPENSSL) && defined(WITH_OPENSSL_QUIC)
+	/* reset per connect attempt - networkHandles persist across serverURIs failovers,
+	   and a stale QUIC_MODE_ONLY would create a QUIC context for a TLS connection */
+	aClient->net.quic_mode = QUIC_MODE_NONE;
+#endif
+
 	if (!unixsock)
 	{
 		if (aClient->httpProxy)
@@ -247,6 +253,25 @@ int MQTTProtocol_connect(const char* address, Clients* aClient, int unixsock, in
 		rc = Socket_new(aClient->net.http_proxy, addr_len, port, &(aClient->net.socket));
 #endif
 	}
+#if defined(OPENSSL) && defined(WITH_OPENSSL_QUIC)
+	else if (ssl == 2) {
+		/* HTTP(S) proxies are TCP CONNECT tunnels; they cannot carry QUIC/UDP.
+		   Fail this URI so serverURIs can fall through to ssl:// / tcp://. */
+		if (aClient->net.https_proxy || aClient->net.http_proxy)
+		{
+			Log(LOG_ERROR, -1, "HTTP(S) proxies are not supported for quic:// connections");
+			rc = SOCKET_ERROR;
+			goto exit;
+		}
+		addr_len = MQTTProtocol_addressPort(address, &port, NULL, QUIC_DEFAULT_PORT);
+		aClient->net.quic_mode = QUIC_MODE_ONLY;
+#if defined(__GNUC__) && defined(__linux__)
+		rc = Socket_dgram_new(address, addr_len, port, &(aClient->net.socket), timeout);
+#else
+		rc = Socket_dgram_new(address, addr_len, port, &(aClient->net.socket));
+#endif
+	}
+#endif
 #if defined(OPENSSL)
 	else if (ssl && aClient->net.https_proxy) {
 		addr_len = MQTTProtocol_addressPort(aClient->net.https_proxy, &port, NULL, PROXY_DEFAULT_PORT);
@@ -283,14 +308,15 @@ int MQTTProtocol_connect(const char* address, Clients* aClient, int unixsock, in
 		rc = Socket_new(address, addr_len, port, &(aClient->net.socket));
 #endif
 	}
+
 	if (rc == EINPROGRESS || rc == EWOULDBLOCK)
 		aClient->connect_state = TCP_IN_PROGRESS; /* TCP connect called - wait for connect completion */
 	else if (rc == 0)
-	{	/* TCP connect completed. If SSL, send SSL connect */
+	{	/* TCP/UDP connect completed. If SSL, send SSL connect */
 #if defined(OPENSSL)
 		if (ssl)
 		{
-			if (aClient->net.https_proxy) {
+			if (aClient->net.https_proxy && ssl != 2) {
 				aClient->connect_state = PROXY_CONNECT_IN_PROGRESS;
 				rc = Proxy_connect( &aClient->net, 1, address);
 			}
@@ -302,11 +328,19 @@ int MQTTProtocol_connect(const char* address, Clients* aClient, int unixsock, in
 					SSLSocket_connect(aClient->net.ssl, aClient->net.socket, address,
 						aClient->sslopts->verify, NULL, NULL);
 				if (sslrc == 1) /* success */
+				{
+					/* QUIC SSL objects were already made non-blocking in
+					   SSLSocket_setSocketForSSL, before the first SSL_connect */
 					rc = 0;
+				}
 				else if (sslrc < 0)
 					rc = sslrc;
 				if (rc == TCPSOCKET_INTERRUPTED)
 					aClient->connect_state = SSL_IN_PROGRESS; /* SSL connect called - wait for completion */
+				else if (!rc)
+				{
+					aClient->connect_state = NOT_IN_PROGRESS;
+				}
 			}
 			else
 				rc = SOCKET_ERROR;

@@ -1056,6 +1056,8 @@ typedef struct
 #define MQTT_SSL_VERSION_TLS_1_0 1
 #define MQTT_SSL_VERSION_TLS_1_1 2
 #define MQTT_SSL_VERSION_TLS_1_2 3
+#define MQTT_SSL_VERSION_TLS_1_3 4
+#define MQTT_SSL_VERSION_QUIC    5
 
 /**
 * MQTTAsync_sslProperties defines the settings to establish an SSL/TLS connection using the
@@ -1113,8 +1115,8 @@ typedef struct
     int enableServerCertAuth;
 
     /** The SSL/TLS version to use. Specify one of MQTT_SSL_VERSION_DEFAULT (0),
-    * MQTT_SSL_VERSION_TLS_1_0 (1), MQTT_SSL_VERSION_TLS_1_1 (2) or MQTT_SSL_VERSION_TLS_1_2 (3).
-    * Only used if struct_version is >= 1.
+    * MQTT_SSL_VERSION_TLS_1_0 (1), MQTT_SSL_VERSION_TLS_1_1 (2), MQTT_SSL_VERSION_TLS_1_2 (3)
+    * or MQTT_SSL_VERSION_TLS_1_3 (4). Only used if struct_version is >= 1.
     */
     int sslVersion;
 
@@ -2390,6 +2392,11 @@ exit:
   * If the environment variable PAHO_C_CLIENT_USE_HTTP_PROXY is set to TRUE, then the
   * http_proxy or https_proxy (lower case only) environment variables are used, for plain
   * TCP and TLS-secured connections respectively.
+  *
+  * HTTP(S) proxies are not supported for <code>quic://</code> connections.  A
+  * QUIC URI attempted while a proxy is configured fails so that
+  * <code>serverURIs</code> can fall through to <code>ssl://</code> or
+  * <code>tcp://</code>.
   *
   * The no_proxy environment variable can be used to exclude certain hosts from using an
   * environment variable chosen proxy. This does not apply to a proxy selected through the API.

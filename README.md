@@ -23,7 +23,7 @@ Synchronous and various asynchronous programming models are supported.
 The Paho C client comprises four variant libraries, shared or static:
 
  * paho-mqtt3a - asynchronous (MQTTAsync)
- * paho-mqtt3as - asynchronous with SSL/TLS (MQTTAsync)
+ * paho-mqtt3as - asynchronous with SSL/TLS (MQTTAsync); also supports QUIC when built with `PAHO_WITH_QUIC=TRUE`
  * paho-mqtt3c - "classic" / synchronous (MQTTClient)
  * paho-mqtt3cs - "classic" / synchronous with SSL/TLS (MQTTClient)
 
@@ -39,6 +39,7 @@ Samples are available in the Doxygen docs and also in `src/samples` for referenc
 - *paho_cs_pub.c* and *paho_cs_sub.c:* command line utilities using MQTTClient to publish and subscribe
 - *MQTTClient_publish.c, MQTTClient_subscribe.c* and *MQTTClient_publish_async.c:* MQTTClient simple code examples
 - *MQTTAsync_publish.c* and *MQTTAsync_subscribe.c:* MQTTAsync simple code examples
+- *MQTTAsync_quic_publish.c* and *MQTTAsync_quic_subscribe.c:* MQTTAsync code examples using QUIC, taking optional `[uri] [username] [password]` arguments
 
 Some potentially useful blog posts:
 
@@ -50,7 +51,7 @@ Some potentially useful blog posts:
 
 ### Supported Network Protocols
 
-The library supports connecting to an MQTT server using TCP, SSL/TLS, Unix-domain sockets, and websockets (secure and insecure). This is chosen by the client using the URI supplied in the connect options. It can be specified as:
+The library supports connecting to an MQTT server using TCP, SSL/TLS, Unix-domain sockets, websockets (secure and insecure), and QUIC. This is chosen by the client using the URI supplied in the connect options. It can be specified as:
 
     "mqtt://<host>:<port>"         - TCP, unsecure
      "tcp://<host>:<port>"           (same)
@@ -63,11 +64,25 @@ The library supports connecting to an MQTT server using TCP, SSL/TLS, Unix-domai
     "ws://<host>:<port>[/path]"    - Websockets, unsecure
     "wss://<host>:<port>[/path]"   - Websockets, secure
 
+    "quic://<host>:<port>"         - QUIC (always TLS-secured)
+
 The "mqtt://" and "tcp://" schemas are identical. They indicate an insecure connection over TCP. The "mqtt://" variation is new for the library, but becoming more common across different MQTT libraries.
 
 Similarly, the "mqtts://" and "ssl://" schemas are identical. They specify a secure connection over SSL/TLS sockets. The use any of the secure connect options requires that you compile the library with the `PAHO_WITH_SSL=TRUE` CMake option to include OpenSSL. In addition, you _must_ specify `ssl_options` when you connect to the broker - i.e. you must add an instance of `ssl_options` to the `connect_options` when calling `connect()`.
 
 The use of Unix-domain sockets requires the build option of `PAHO_WITH_UNIX_SOCKETS=TRUE` is required. This is only available on *nix-style systems like Linux and macOS. It is not vailable on Windows.
+
+The "quic://" schema specifies MQTT over QUIC, which is always secured with TLS (QUIC does not allow unencrypted connections). Requirements and characteristics:
+
+- **OpenSSL 3.2 or later** — QUIC support is implemented using the OpenSSL QUIC API (`OSSL_QUIC_client_thread_method`), which first appeared in OpenSSL 3.2 (see the [OpenSSL QUIC documentation](https://docs.openssl.org/3.6/man7/openssl-quic/)). LibreSSL and OpenSSL 1.x do not support QUIC.
+- **Build options** — the library must be built with both `PAHO_WITH_SSL=TRUE` and `PAHO_WITH_QUIC=TRUE`.
+- **MQTTAsync only** — QUIC connections are supported by the asynchronous library (`paho-mqtt3as`, MQTTAsync API). The synchronous MQTTClient library does not support `quic://` URIs.
+- **ALPN** — the client negotiates the `mqtt` ALPN protocol, as required for MQTT over QUIC.
+- **Default stream mode** — all MQTT traffic uses a single client-initiated bidirectional stream (OpenSSL default stream mode), which matches MQTT's requirement for one ordered byte stream per connection. Multi-stream mode is not used.
+- **Default port** — a `quic://` URI without an explicit port defaults to 14567 (the port used by EMQX and Tencent TDMQ for MQTT over QUIC).
+- **No automatic TCP fallback** — if UDP is blocked (common on corporate networks), a `quic://` connection attempt fails by timeout rather than falling back to TCP. For fallback, configure `serverURIs` with a `quic://` URI first and an `ssl://` (or `tcp://`) URI second; the client tries them in order, e.g. `{"quic://broker:14567", "ssl://broker:8883"}`.
+- **No HTTP(S) proxies** — `httpProxy` / `httpsProxy` and the `http_proxy` / `https_proxy` environment variables are TCP CONNECT tunnels and cannot carry QUIC. A `quic://` attempt with a proxy configured fails that URI (so `serverURIs` can fall through to `ssl://`) instead of silently connecting to the proxy.
+- **Server certificate verification** — as with SSL/TLS connections, `ssl_options` should be supplied in the connect options (e.g. `trustStore` and `enableServerCertAuth` to verify the broker certificate).
 
 ## Runtime tracing
 
@@ -187,12 +202,15 @@ OPENSSL_ROOT_DIR | "" (system default) | Directory containing your OpenSSL insta
 PAHO_WITH_LIBRESSL | FALSE | Flag that defines whether to build ssl-enabled binaries with LibreSSL instead of OpenSSL.  
 LIBRESSL_ROOT_DIR | "" (system default) | Directory containing your LibreSSL installation (i.e. `/usr/local` when headers are in `/usr/local/include` and libraries are in `/usr/local/lib`)
 PAHO_WITH_UNIX_SOCKETS | FALSE | (*nix systems only) Flag to enable support for UNIX-domain sockets
+PAHO_WITH_QUIC | FALSE | Flag that defines whether to build QUIC support into the ssl-enabled binaries (requires `PAHO_WITH_SSL=TRUE` and OpenSSL with QUIC support, i.e. OpenSSL 3.2 or later). Enables `quic://` URIs in the MQTTAsync library.
 PAHO_BUILD_DOCUMENTATION | FALSE | Create and install the HTML based API documentation (requires Doxygen)
 PAHO_BUILD_SAMPLES | FALSE | Build sample programs
 PAHO_ENABLE_TESTING | TRUE | Build test and run
 MQTT_TEST_BROKER | tcp://localhost:1883 | MQTT connection URL for a broker to use during test execution
 MQTT_TEST_PROXY | tcp://localhost:1883 | Hostname of the test proxy to use
 MQTT_SSL_HOSTNAME | localhost | Hostname of a test SSL MQTT broker to use
+MQTT_QUIC_TEST_BROKER | quic://localhost:18885 | MQTT connection URL for a QUIC-enabled broker to use during test execution
+MQTT_QUIC_HOSTNAME | localhost | Hostname of a test QUIC MQTT broker to use. test9000-7 uses a 5 MB payload (EMQX allows 100 MB). Against TDMQ (4 MB packet cap) run test9000 with `--size 2097152`.
 PAHO_BUILD_DEB_PACKAGE | FALSE | Build debian package
 
 Using these variables CMake can be used to generate your Ninja or Make files. Using CMake, building out-of-source is the default. Therefore it is recommended to invoke all build commands inside your chosen build directory but outside of the source tree.

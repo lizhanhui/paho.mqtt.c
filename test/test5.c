@@ -17,7 +17,7 @@
 
 /**
  * @file
- * SSL tests for the Eclipse Paho Asynchronous MQTT C client
+ * SSL/QUIC tests for the Eclipse Paho Asynchronous MQTT C client
  */
 
 #include "MQTTAsync.h"
@@ -47,6 +47,10 @@ void usage(void)
 	printf("\t--client_key <key_file> - Use <key_file> as the client certificate for SSL authentication\n");
 	printf("\t--client_key_pass <password> - Use <password> to access the private key in the client certificate\n");
 	printf("\t--server_key <key_file> - Use <key_file> as the trusted certificate for server\n");
+	printf("\t--username <username> - Use <username> for MQTT authentication (overrides built-in default)\n");
+	printf("\t--password <password> - Use <password> for MQTT authentication (overrides built-in default)\n");
+	printf("\t--same_port - Use the base connection (hostname/start_port) for all tests, for servers\n");
+	printf("\t\twith a single listener instead of the local multi-port test rig\n");
 	printf("\t--verbose - Enable verbose output \n");
 	printf("\t--help - This help output\n");
 	exit(EXIT_FAILURE);
@@ -65,10 +69,15 @@ struct Options
 	char* server_key_file;
 	char* client_private_key_file;
 	char* capath;
+	char* username;
+	char* password;
+	char* hostname;
+	int same_port;
 	int verbose;
 	int test_no;
 	int size;
 	int websockets;
+	int quic;
 	int message_count;
 	int start_port;
 } options =
@@ -84,9 +93,14 @@ struct Options
 	NULL, // "../../../test/ssl/test-root-ca.crt",
 	NULL, // "../../../test/ssl/capath",
 	NULL,
+	NULL,
+	NULL,
+	NULL,
+	0,
 	0,
 	0,
 	5000000,
+	0,
 	0,
 	3,
 	18883,
@@ -144,6 +158,14 @@ void getopts(int argc, char** argv)
 			else
 				usage();
 		}
+		else if (strcmp(argv[count], "--client_private_key") == 0)
+		{
+			if (++count < argc)
+				options.client_private_key_file = argv[count];
+			else
+				usage();
+		}
+
 		else if (strcmp(argv[count], "--capath") == 0)
 		{
 			if (++count < argc)
@@ -160,7 +182,15 @@ void getopts(int argc, char** argv)
 		{
 			if (++count < argc)
 			{
-				char* prefix = (options.websockets) ? "wss" : "ssl";
+				char* prefix = "";
+
+				options.hostname = argv[count];
+				if (options.websockets)
+					prefix = "wss";
+				else if (options.quic)
+					prefix = "quic";
+				else
+					prefix = "ssl";
 
 				sprintf(options.connection, "%s://%s:%d", prefix, argv[count],
 						options.start_port);
@@ -190,6 +220,34 @@ void getopts(int argc, char** argv)
 			options.websockets = 1;
 			printf("\nSetting websockets on\n");
 		}
+		else if (strcmp(argv[count], "--quic") == 0)
+		{
+			options.quic = 1;
+			printf("\nSetting QUIC on\n");
+		}
+		else if (strcmp(argv[count], "--username") == 0)
+		{
+			if (++count < argc)
+			{
+				options.username = argv[count];
+				printf("Setting username to %s\n", options.username);
+			}
+			else
+				usage();
+		}
+		else if (strcmp(argv[count], "--password") == 0)
+		{
+			if (++count < argc)
+				options.password = argv[count];
+			else
+				usage();
+		}
+		else if (strcmp(argv[count], "--same_port") == 0)
+		{
+			options.same_port = 1;
+			printf("\nSetting same_port on\n");
+		}
+
 		else if (strcmp(argv[count], "--size") == 0)
 		{
 			if (++count < argc)
@@ -266,6 +324,16 @@ void MyLog(int LOGA_level, char* format, ...)
 	fflush(stdout);
 }
 
+static void logFailureData(const char* where, MQTTAsync_failureData* response)
+{
+	if (response)
+		MyLog(LOGA_INFO, "%s: code=%d message=%s",
+			where, response->code,
+			response->message ? response->message : "(null)");
+	else
+		MyLog(LOGA_INFO, "%s: no failure data", where);
+}
+
 
 #if defined(_WIN32) || defined(_WINDOWS)
 #define mqsleep(A) Sleep(1000*A)
@@ -334,6 +402,11 @@ START_TIME_TYPE global_start_time;
 char output[3000];
 char* cur_output = output;
 
+
+void handleTrace(enum MQTTASYNC_TRACE_LEVELS level, char* message)
+{
+	printf("%s\n", message);
+}
 
 void write_test_result(void)
 {
@@ -650,6 +723,7 @@ int test1OnFailureCalled = 0;
 
 void test1OnFailure(void* context, MQTTAsync_failureData* response)
 {
+	logFailureData("test1OnFailure", response);
 	MyLog(LOGA_DEBUG, "In connect onFailure callback, context %p", context);
 
 	test1OnFailureCalled++;
@@ -699,8 +773,8 @@ int test1(struct Options options)
 
 	opts.keepAliveInterval = 20;
 	opts.cleansession = 1;
-	opts.username = "testuser";
-	opts.password = "testpassword";
+	opts.username = options.username ? options.username : "testuser";
+	opts.password = options.password ? options.password : "testpassword";
 
 	opts.will = &wopts;
 	opts.will->message = "will message";
@@ -751,6 +825,7 @@ int test1(struct Options options)
 void test2aOnConnectFailure(void* context, MQTTAsync_failureData* response)
 {
 	AsyncTestClient* client = (AsyncTestClient*) context;
+	logFailureData("test2aOnConnectFailure", response);
 	MyLog(LOGA_DEBUG, "In test2aOnConnectFailure callback, %s",
 			client->clientid);
 
@@ -781,6 +856,7 @@ int test2a(struct Options options)
 
 	failures = 0;
 	MyLog(LOGA_INFO, "Starting test 2a - Mutual SSL authentication");
+
 	fprintf(xml, "<testcase classname=\"test5\" name=\"%s\"", testname);
 	global_start_time = start_clock();
 
@@ -799,8 +875,8 @@ int test2a(struct Options options)
 
 	opts.keepAliveInterval = 20;
 	opts.cleansession = 1;
-	opts.username = "testuser";
-	opts.password = "testpassword";
+	opts.username = options.username ? options.username : "testuser";
+	opts.password = options.password ? options.password : "testpassword";
 
 	opts.will = &wopts;
 	opts.will->message = "will message";
@@ -818,6 +894,9 @@ int test2a(struct Options options)
 	opts.ssl->keyStore = options.client_key_file; /*file of certificate for client to present to server*/
 	if (options.client_key_pass != NULL)
 		opts.ssl->privateKeyPassword = options.client_key_pass;
+	if (options.client_private_key_file != NULL)
+		opts.ssl->privateKey = options.client_private_key_file;
+
 	//opts.ssl->enabledCipherSuites = "DEFAULT";
 	//opts.ssl->enabledServerCertAuth = 1;
 	opts.ssl->verify = 1;
@@ -870,6 +949,7 @@ int test2bFinished;
 
 void test2bOnConnectFailure(void* context, MQTTAsync_failureData* response)
 {
+	logFailureData("test2bOnConnectFailure", response);
 	MyLog(LOGA_DEBUG, "In test2bOnConnectFailure callback, context %p", context);
 
 	assert("This test should call test2bOnConnectFailure. ", 1, "test2bOnConnectFailure callback was called\n", 1);
@@ -913,8 +993,8 @@ int test2b(struct Options options)
 
 	opts.keepAliveInterval = 20;
 	opts.cleansession = 1;
-	opts.username = "testuser";
-	opts.password = "testpassword";
+	opts.username = options.username ? options.username : "testuser";
+	opts.password = options.password ? options.password : "testpassword";
 
 	opts.will = &wopts;
 	opts.will->message = "will message";
@@ -932,6 +1012,9 @@ int test2b(struct Options options)
 	opts.ssl->keyStore = options.client_key_file; /*file of certificate for client to present to server*/
 	if (options.client_key_pass != NULL)
 		opts.ssl->privateKeyPassword = options.client_key_pass;
+	if (options.client_private_key_file != NULL)
+		opts.ssl->privateKey = options.client_private_key_file;
+
 	//opts.ssl->enabledCipherSuites = "DEFAULT";
 	//opts.ssl->enabledServerCertAuth = 0;
 
@@ -947,6 +1030,8 @@ int test2b(struct Options options)
 #else
 		usleep(10000L);
 #endif
+
+	assert("connect result callback was called", test2bFinished == 1, "test2bFinished was %d", test2bFinished);
 
 	exit: MQTTAsync_destroy(&c);
 	MyLog(LOGA_INFO, "%s: test %s. %d tests run, %d failures.",
@@ -965,6 +1050,7 @@ int test2cFinished;
 
 void test2cOnConnectFailure(void* context, MQTTAsync_failureData* response)
 {
+	logFailureData("test2cOnConnectFailure", response);
 	MyLog(LOGA_DEBUG, "In test2cOnConnectFailure callback, context %p", context);
 
 	assert("This test should call test2cOnConnectFailure. ", 1, "test2cOnConnectFailure callback was called\n", 0);
@@ -1009,8 +1095,8 @@ int test2c(struct Options options)
 
 	opts.keepAliveInterval = 20;
 	opts.cleansession = 1;
-	opts.username = "testuser";
-	opts.password = "testpassword";
+	opts.username = options.username ? options.username : "testuser";
+	opts.password = options.password ? options.password : "testpassword";
 
 	opts.will = &wopts;
 	opts.will->message = "will message";
@@ -1027,6 +1113,9 @@ int test2c(struct Options options)
 	opts.ssl->keyStore = options.client_key_file; /*file of certificate for client to present to server*/
 	if (options.client_key_pass != NULL)
 		opts.ssl->privateKeyPassword = options.client_key_pass;
+	if (options.client_private_key_file != NULL)
+		opts.ssl->privateKey = options.client_private_key_file;
+
 	//opts.ssl->enabledCipherSuites = "DEFAULT";
 	//opts.ssl->enabledServerCertAuth = 0;
 
@@ -1046,6 +1135,8 @@ int test2c(struct Options options)
 		usleep(10000L);
 #endif
 
+	assert("connect result callback was called", test2cFinished == 1, "test2cFinished was %d", test2cFinished);
+
 	exit: MQTTAsync_destroy(&c);
 	MyLog(LOGA_INFO, "%s: test %s. %d tests run, %d failures.",
 			(failures == 0) ? "passed" : "failed", testname, tests, failures);
@@ -1064,6 +1155,7 @@ int test2dFinished;
 
 void test2dOnConnectFailure(void* context, MQTTAsync_failureData* response)
 {
+	logFailureData("test2dOnConnectFailure", response);
 	MyLog(LOGA_DEBUG, "In test2dOnConnectFailure callback, context %p", context);
 
 	assert("This test should call test2dOnConnectFailure. ", 1, "test2dOnConnectFailure callback was called\n", 0);
@@ -1090,6 +1182,7 @@ int test2d(struct Options options)
 	char* test_topic = "C client test2d";
 	int count = 0;
 	unsigned int iteration = 0;
+	unsigned int max_iterations = 20;
 
 	failures = 0;
 	MyLog(
@@ -1102,7 +1195,12 @@ int test2d(struct Options options)
 	// there is/was some race condition, which caused _sometimes_ that the library failed to detect,
 	// that the connect attempt has already failed.
 	// Therefore we need to test this several times!
-	for (iteration = 0; !failures && (iteration < 20) ; iteration++)
+	// EMQX QUIC does not implement fail_if_no_peer_cert, so a missing client
+	// cert hangs the handshake instead of failing it. Bound connectTimeout
+	// so onFailure fires inside the wait loop (default 30s > TEST2D_COUNT).
+	if (options.quic)
+		max_iterations = 3;
+	for (iteration = 0; !failures && (iteration < max_iterations) ; iteration++)
 	{
 		count = 0;
 		MQTTAsync_setTraceLevel(MQTTASYNC_TRACE_ERROR);
@@ -1120,6 +1218,7 @@ int test2d(struct Options options)
 
 		opts.keepAliveInterval = 60;
 		opts.cleansession = 1;
+		opts.connectTimeout = 5;
 
 		opts.will = &wopts;
 		opts.will->message = "will message";
@@ -1146,7 +1245,7 @@ int test2d(struct Options options)
 			MQTTAsync_destroy(&c);
 			break;
 		}
-#define TEST2D_COUNT 1000
+#define TEST2D_COUNT 1500
 		while (!test2dFinished && ++count < TEST2D_COUNT)
 		{
 #if defined(_WIN32)
@@ -1177,6 +1276,7 @@ int test2d(struct Options options)
 void test2eOnConnectFailure(void* context, MQTTAsync_failureData* response)
 {
 	AsyncTestClient* client = (AsyncTestClient*) context;
+	logFailureData("test2eOnConnectFailure", response);
 	MyLog(LOGA_DEBUG, "In test2eOnConnectFailure callback, %s",
 			client->clientid);
 
@@ -1226,8 +1326,8 @@ int test2e(struct Options options)
 
 	opts.keepAliveInterval = 20;
 	opts.cleansession = 1;
-	opts.username = "testuser";
-	opts.password = "testpassword";
+	opts.username = options.username ? options.username : "testuser";
+	opts.password = options.password ? options.password : "testpassword";
 
 	opts.will = &wopts;
 	opts.will->message = "will message";
@@ -1247,6 +1347,9 @@ int test2e(struct Options options)
 	opts.ssl->keyStore = options.client_key_file; /*file of certificate for client to present to server*/
 	if (options.client_key_pass != NULL)
 		opts.ssl->privateKeyPassword = options.client_key_pass;
+	if (options.client_private_key_file != NULL)
+		opts.ssl->privateKey = options.client_private_key_file;
+
 	//opts.ssl->enabledCipherSuites = "DEFAULT";
 	//opts.ssl->enabledServerCertAuth = 1;
 	opts.ssl->verify = 1;
@@ -1298,6 +1401,7 @@ int test2e(struct Options options)
 void test3aOnConnectFailure(void* context, MQTTAsync_failureData* response)
 {
 	AsyncTestClient* client = (AsyncTestClient*) context;
+	logFailureData("test3aOnConnectFailure", response);
 	MyLog(LOGA_DEBUG, "In test3aOnConnectFailure callback, context %p", context);
 
 	assert("There should be no failures in this test. ", 0, "test3aOnConnectFailure callback was called\n", 0);
@@ -1336,8 +1440,8 @@ int test3a(struct Options options)
 
 	opts.keepAliveInterval = 20;
 	opts.cleansession = 1;
-	opts.username = "testuser";
-	opts.password = "testpassword";
+	opts.username = options.username ? options.username : "testuser";
+	opts.password = options.password ? options.password : "testpassword";
 
 	opts.will = &wopts;
 	opts.will->message = "will message";
@@ -1354,6 +1458,9 @@ int test3a(struct Options options)
 		opts.ssl->trustStore = options.server_key_file; /*file of certificates trusted by client*/
 	//opts.ssl->keyStore = options.client_key_file;  /*file of certificate for client to present to server*/
 	//if (options.client_key_pass != NULL) opts.ssl->privateKeyPassword = options.client_key_pass;
+	//	if (options.client_private_key_file != NULL)
+	//	opts.ssl->privateKey = options.client_private_key_file;
+
 	//opts.ssl->enabledCipherSuites = "DEFAULT";
 	//opts.ssl->enabledServerCertAuth = 1;
 
@@ -1423,6 +1530,7 @@ int test3bFinished;
 
 void test3bOnConnectFailure(void* context, MQTTAsync_failureData* response)
 {
+	logFailureData("test3bOnConnectFailure", response);
 	MyLog(LOGA_DEBUG, "In test3bOnConnectFailure callback, context %p", context);
 
 	assert("This test should call test3bOnConnectFailure. ", 1, "test3bOnConnectFailure callback was called\n", 1);
@@ -1464,8 +1572,8 @@ int test3b(struct Options options)
 
 	opts.keepAliveInterval = 20;
 	opts.cleansession = 1;
-	opts.username = "testuser";
-	opts.password = "testpassword";
+	opts.username = options.username ? options.username : "testuser";
+	opts.password = options.password ? options.password : "testpassword";
 
 	opts.will = &wopts;
 	opts.will->message = "will message";
@@ -1497,6 +1605,8 @@ int test3b(struct Options options)
 		usleep(10000L);
 #endif
 
+	assert("connect result callback was called", test3bFinished == 1, "test3bFinished was %d", test3bFinished);
+
 	exit: MQTTAsync_destroy(&c);
 	MyLog(LOGA_INFO, "%s: test %s. %d tests run, %d failures.",
 			(failures == 0) ? "passed" : "failed", testname, tests, failures);
@@ -1513,6 +1623,7 @@ int test3b(struct Options options)
 void test4OnConnectFailure(void* context, MQTTAsync_failureData* response)
 {
 	AsyncTestClient* client = (AsyncTestClient*) context;
+	logFailureData("test4OnConnectFailure", response);
 	MyLog(LOGA_DEBUG, "In test4OnConnectFailure callback, context %p", context);
 
 	assert("There should be no failures in this test. ", 0, "test4OnConnectFailure callback was called\n", 0);
@@ -1558,8 +1669,8 @@ int test4(struct Options options)
 
 	opts.keepAliveInterval = 20;
 	opts.cleansession = 1;
-	opts.username = "testuser";
-	opts.password = "testpassword";
+	opts.username = options.username ? options.username : "testuser";
+	opts.password = options.password ? options.password : "testpassword";
 
 	opts.will = &wopts;
 	opts.will->message = "will message";
@@ -1576,6 +1687,9 @@ int test4(struct Options options)
 	//opts.ssl->keyStore = options.client_key_file;  /*file of certificate for client to present to server*/
 	//if (options.client_key_pass != NULL) opts.ssl->privateKeyPassword = options.client_key_pass;
 	//opts.ssl->enabledCipherSuites = "DEFAULT";
+	//	if (options.client_private_key_file != NULL)
+	//	opts.ssl->privateKey = options.client_private_key_file;
+
 	opts.ssl->enableServerCertAuth = 0;
 
 	rc = MQTTAsync_setCallbacks(c, &tc, NULL, asyncTestMessageArrived,
@@ -1623,6 +1737,7 @@ int test4(struct Options options)
 void test5aOnConnectFailure(void* context, MQTTAsync_failureData* response)
 {
 	AsyncTestClient* client = (AsyncTestClient*) context;
+	logFailureData("test5aOnConnectFailure", response);
 	MyLog(LOGA_DEBUG, "In test5aOnConnectFailure callback, context %p", context);
 
 	assert("There should be no failures in this test. ", 0, "test5aOnConnectFailure callback was called\n", 0);
@@ -1672,8 +1787,8 @@ int test5a(struct Options options)
 
 	opts.keepAliveInterval = 20;
 	opts.cleansession = 1;
-	opts.username = "testuser";
-	opts.password = "testpassword";
+	opts.username = options.username ? options.username : "testuser";
+	opts.password = options.password ? options.password : "testpassword";
 
 	opts.will = &wopts;
 	opts.will->message = "will message";
@@ -1689,6 +1804,9 @@ int test5a(struct Options options)
 	//opts.ssl->trustStore = /*file of certificates trusted by client*/
 	//opts.ssl->keyStore = options.client_key_file;  /*file of certificate for client to present to server*/
 	//if (options.client_key_pass != NULL) opts.ssl->privateKeyPassword = options.client_key_pass;
+	//	if (options.client_private_key_file != NULL)
+	//	opts.ssl->privateKey = options.client_private_key_file;
+
 	opts.ssl->enabledCipherSuites = "aNULL";
 	opts.ssl->enableServerCertAuth = 0;
 
@@ -1756,6 +1874,7 @@ int test5a(struct Options options)
 void test5bOnConnectFailure(void* context, MQTTAsync_failureData* response)
 {
 	AsyncTestClient* client = (AsyncTestClient*) context;
+	logFailureData("test5bOnConnectFailure", response);
 	MyLog(LOGA_DEBUG, "In test5bOnConnectFailure callback, context %p", context);
 
 	assert("There should be no failures in this test. ", 0, "test5bOnConnectFailure callback was called\n", 0);
@@ -1805,8 +1924,8 @@ int test5b(struct Options options)
 
 	opts.keepAliveInterval = 20;
 	opts.cleansession = 1;
-	opts.username = "testuser";
-	opts.password = "testpassword";
+	opts.username = options.username ? options.username : "testuser";
+	opts.password = options.password ? options.password : "testpassword";
 
 	opts.will = &wopts;
 	opts.will->message = "will message";
@@ -1890,6 +2009,7 @@ int test5cFinished;
 
 void test5cOnConnectFailure(void* context, MQTTAsync_failureData* response)
 {
+	logFailureData("test5cOnConnectFailure", response);
 	MyLog(LOGA_DEBUG, "In test5cOnConnectFailure callback, context %p", context);
 
 	assert("This test should call test5cOnConnectFailure. ", 1, "test5cOnConnectFailure callback was called\n", 1);
@@ -1930,8 +2050,8 @@ int test5c(struct Options options)
 
 	opts.keepAliveInterval = 20;
 	opts.cleansession = 1;
-	opts.username = "testuser";
-	opts.password = "testpassword";
+	opts.username = options.username ? options.username : "testuser";
+	opts.password = options.password ? options.password : "testpassword";
 
 	opts.will = &wopts;
 	opts.will->message = "will message";
@@ -1980,6 +2100,7 @@ exit:
 void test6OnConnectFailure(void* context, MQTTAsync_failureData* response)
 {
 	AsyncTestClient* client = (AsyncTestClient*) context;
+	logFailureData("test6OnConnectFailure", response);
 	MyLog(LOGA_DEBUG, "In test6OnConnectFailure callback, context %p", context);
 
 	assert("There should be no failures in this test. ", 0, "test6OnConnectFailure callback was called\n", 0);
@@ -2009,7 +2130,7 @@ int test6(struct Options options)
 	MyLog(LOGA_INFO, "Starting test 6 - multiple connections");
 	fprintf(xml, "<testcase classname=\"test5\" name=\"%s\"", testname);
 	global_start_time = start_clock();
-
+	//MQTTAsync_setTraceLevel(MQTTASYNC_TRACE_MINIMUM);
 	for (i = 0; i < num_clients; ++i)
 	{
 		tc[i].maxmsgs = MAXMSGS;
@@ -2033,8 +2154,8 @@ int test6(struct Options options)
 
 		opts.keepAliveInterval = 20;
 		opts.cleansession = 1;
-		opts.username = "testuser";
-		opts.password = "testpassword";
+		opts.username = options.username ? options.username : "testuser";
+		opts.password = options.password ? options.password : "testpassword";
 
 		opts.will = &wopts;
 		opts.will->message = "will message";
@@ -2051,6 +2172,9 @@ int test6(struct Options options)
 		opts.ssl->keyStore = options.client_key_file; /*file of certificate for client to present to server*/
 		if (options.client_key_pass != NULL)
 			opts.ssl->privateKeyPassword = options.client_key_pass;
+		if (options.client_private_key_file != NULL)
+			opts.ssl->privateKey = options.client_private_key_file;
+
 		//opts.ssl->enabledCipherSuites = "DEFAULT";
 		//opts.ssl->enabledServerCertAuth = 1;
 
@@ -2103,6 +2227,7 @@ int test7_payloadlen = 0;
 void test7OnConnectFailure(void* context, MQTTAsync_failureData* response)
 {
 	AsyncTestClient* client = (AsyncTestClient*) context;
+	logFailureData("test7OnConnectFailure", response);
 	MyLog(LOGA_DEBUG, "In test7OnConnectFailure callback, %s", client->clientid);
 
 	assert("There should be no failures in this test. ", 0, "test7OnConnectFailure callback was called\n", 0);
@@ -2158,8 +2283,8 @@ int test7MessageArrived(void* context, char* topicName, int topicLen,
 	{
 		if (((char*) test7_payload)[i] != ((char*) message->payload)[i])
 		{
-			assert("Message contents correct", ((char*)test7_payload)[i] != ((char*)message->payload)[i],
-					"message content was %c", ((char*)message->payload)[i]);
+			assert("Message contents correct", ((char*)test7_payload)[i] == ((char*)message->payload)[i],
+					"message content differs at index %d", i);
 			break;
 		}
 	}
@@ -2274,6 +2399,9 @@ int test7(struct Options options)
 
 	test_finished = failures = 0;
 
+	MQTTAsync_setTraceLevel(MQTTASYNC_TRACE_ERROR);
+	MQTTAsync_setTraceCallback(handleTrace);
+
 	MyLog(LOGA_INFO, "Starting test 7 - big messages");
 	fprintf(xml, "<testcase classname=\"test5\" name=\"%s\"", testname);
 	global_start_time = start_clock();
@@ -2300,8 +2428,8 @@ int test7(struct Options options)
 
 	opts.keepAliveInterval = 60;
 	opts.cleansession = 1;
-	//opts.username = "testuser";
-	//opts.password = "testpassword";
+	opts.username = options.username;
+	opts.password = options.password;
 
 	opts.will = &wopts;
 	opts.will->message = "will message";
@@ -2320,12 +2448,14 @@ int test7(struct Options options)
 		opts.ssl->keyStore = options.client_key_file; /*file of certificate for client to present to server*/
 	if (options.client_key_pass != NULL)
 		opts.ssl->privateKeyPassword = options.client_key_pass;
+	if (options.client_private_key_file != NULL)
+		opts.ssl->privateKey = options.client_private_key_file;
+
 	//opts.ssl->enabledCipherSuites = "DEFAULT";
 	//opts.ssl->enabledServerCertAuth = 1;
 
 	MyLog(LOGA_DEBUG, "Connecting");
 	rc = MQTTAsync_connect(c, &opts);
-	rc = 0;
 	assert("Good rc from connect", rc == MQTTASYNC_SUCCESS, "rc was %d", rc);
 	if (rc != MQTTASYNC_SUCCESS)
 		goto exit;
@@ -2417,8 +2547,8 @@ int test8(struct Options options)
 
 	opts.keepAliveInterval = 20;
 	opts.cleansession = 1;
-	opts.username = "testuser";
-	opts.password = "testpassword";
+	opts.username = options.username ? options.username : "testuser";
+	opts.password = options.password ? options.password : "testpassword";
 
 	opts.onSuccess = asyncTestOnConnect;
 	opts.onFailure = asyncTestOnSubscribeFailure;
@@ -2476,6 +2606,7 @@ exit:
 void test9OnConnectFailure(void* context, MQTTAsync_failureData* response)
 {
 	AsyncTestClient* client = (AsyncTestClient*) context;
+	logFailureData("test9OnConnectFailure", response);
 	MyLog(LOGA_DEBUG, "In test9OnConnectFailure callback, %s",
 			client->clientid);
 
@@ -2515,8 +2646,8 @@ int test9(struct Options options)
 
 	opts.keepAliveInterval = 20;
 	opts.cleansession = 1;
-	opts.username = "testuser";
-	opts.password = "testpassword";
+	opts.username = options.username ? options.username : "testuser";
+	opts.password = options.password ? options.password : "testpassword";
 
 	opts.will = &wopts;
 	opts.will->message = "will message";
@@ -2534,6 +2665,9 @@ int test9(struct Options options)
 	opts.ssl->keyStore = options.client_key_file; /*file of certificate for client to present to server*/
 	if (options.client_key_pass != NULL)
 		opts.ssl->privateKeyPassword = options.client_key_pass;
+	if (options.client_private_key_file != NULL)
+		opts.ssl->privateKey = options.client_private_key_file;
+
 	opts.ssl->CApath = options.capath;
 	opts.ssl->enableServerCertAuth = 1;
 	opts.ssl->verify = 1;
@@ -2587,6 +2721,7 @@ int test10Finished;
 void test10OnConnectFailure(void* context, MQTTAsync_failureData* response)
 {
 	AsyncTestClient* client = (AsyncTestClient*) context;
+	logFailureData("test10OnConnectFailure", response);
 	MyLog(LOGA_DEBUG, "In test10OnConnectFailure callback, %s",
 			client->clientid);
 
@@ -2613,6 +2748,7 @@ int test10(struct Options options)
 	MQTTAsync_willOptions wopts = MQTTAsync_willOptions_initializer;
 	MQTTAsync_SSLOptions sslopts = MQTTAsync_SSLOptions_initializer;
 	int rc = 0;
+	int count = 0;
 
 	failures = 0;
 	test10Finished = 0;
@@ -2636,8 +2772,8 @@ int test10(struct Options options)
 
 	opts.keepAliveInterval = 20;
 	opts.cleansession = 1;
-	opts.username = "testuser";
-	opts.password = "testpassword";
+	opts.username = options.username ? options.username : "testuser";
+	opts.password = options.password ? options.password : "testpassword";
 
 	opts.will = &wopts;
 	opts.will->message = "will message";
@@ -2655,6 +2791,9 @@ int test10(struct Options options)
 	opts.ssl->keyStore = options.client_key_file; /*file of certificate for client to present to server*/
 	if (options.client_key_pass != NULL)
 		opts.ssl->privateKeyPassword = options.client_key_pass;
+	if (options.client_private_key_file != NULL)
+		opts.ssl->privateKey = options.client_private_key_file;
+
 	opts.ssl->CApath = "DUMMY";
 	opts.ssl->enableServerCertAuth = 1;
 	opts.ssl->verify = 1;
@@ -2671,12 +2810,14 @@ int test10(struct Options options)
 	if (rc != MQTTASYNC_SUCCESS)
 		goto exit;
 
-	while (!test10Finished)
+	while (!test10Finished && ++count < 10000)
 #if defined(_WIN32)
 		Sleep(100);
 #else
 		usleep(10000L);
 #endif
+
+	assert("connect result callback was called", test10Finished == 1, "test10Finished was %d", test10Finished);
 	MyLog(LOGA_DEBUG, "Stopping");
 
 	exit: MQTTAsync_destroy(&c);
@@ -2685,13 +2826,6 @@ int test10(struct Options options)
 	write_test_result();
 	return failures;
 }
-
-
-void handleTrace(enum MQTTASYNC_TRACE_LEVELS level, char* message)
-{
-	printf("%s\n", message);
-}
-
 
 int main(int argc, char** argv)
 {
@@ -2706,6 +2840,21 @@ int main(int argc, char** argv)
 
 	MQTTAsync_setTraceCallback(handleTrace);
 	getopts(argc, argv);
+
+	if (options.same_port)
+	{ /* point all the test connection variants at the single base connection */
+		if (options.hostname != NULL)
+		{ /* rebuild the base connection now that start_port is final (getopts is order-dependent) */
+			const char* prefix = options.websockets ? "wss" : (options.quic ? "quic" : "ssl");
+			sprintf(options.connection, "%s://%s:%d", prefix, options.hostname, options.start_port);
+		}
+		strcpy(options.mutual_auth_connection, options.connection);
+		strcpy(options.nocert_mutual_auth_connection, options.connection);
+		strcpy(options.server_auth_connection, options.connection);
+		strcpy(options.anon_connection, options.connection);
+		strcpy(options.psk_connection, options.connection);
+		printf("same_port: using %s for all tests\n", options.connection);
+	}
 
 	if (options.test_no == 0)
 	{ /* run all the tests */

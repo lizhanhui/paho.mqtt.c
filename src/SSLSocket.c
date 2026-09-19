@@ -549,10 +549,46 @@ int SSLSocket_createContext(networkHandles* net, MQTTClient_SSLOptions* opts)
 	int rc = 1;
 
 	FUNC_ENTRY;
+
+#if defined(WITH_OPENSSL_QUIC)
+	if (net->quic_mode > QUIC_MODE_NONE)
+	{
+		Log(TRACE_MINIMUM, -1, "Creating QUIC context");
+		net->ctx = SSL_CTX_new(OSSL_QUIC_client_thread_method());
+		if (net->ctx == NULL)
+		{
+			/* do not fall through to TLS context creation for a QUIC connection */
+			if (opts->struct_version >= 3)
+				SSLSocket_error("SSL_CTX_new (QUIC)", NULL, net->socket, rc, opts->ssl_error_cb, opts->ssl_error_context);
+			else
+				SSLSocket_error("SSL_CTX_new (QUIC)", NULL, net->socket, rc, NULL, NULL);
+			rc = 0;
+			goto exit;
+		}
+	}
+#endif
+
 	if (net->ctx == NULL)
 	{
 #if (OPENSSL_VERSION_NUMBER >= 0x10100000L)
 		net->ctx = SSL_CTX_new(TLS_client_method());
+		if (net->ctx != NULL && opts->struct_version >= 1 && opts->sslVersion == MQTT_SSL_VERSION_TLS_1_3)
+		{
+#if defined(TLS1_3_VERSION)
+			/* restrict the context to TLS 1.3 only */
+			if (SSL_CTX_set_min_proto_version(net->ctx, TLS1_3_VERSION) != 1 ||
+					SSL_CTX_set_max_proto_version(net->ctx, TLS1_3_VERSION) != 1)
+			{
+				Log(TRACE_MINIMUM, -1, "Could not restrict SSL context to TLS 1.3");
+				SSL_CTX_free(net->ctx);
+				net->ctx = NULL;
+			}
+#else
+			Log(TRACE_MINIMUM, -1, "TLS 1.3 is not supported by this TLS library version");
+			SSL_CTX_free(net->ctx);
+			net->ctx = NULL;
+#endif
+		}
 #else
 		int sslVersion = MQTT_SSL_VERSION_DEFAULT;
 		if (opts->struct_version >= 1) sslVersion = opts->sslVersion;
@@ -580,12 +616,22 @@ int SSLSocket_createContext(networkHandles* net, MQTTClient_SSLOptions* opts)
 			net->ctx = SSL_CTX_new(TLSv1_2_client_method());
 			break;
 #endif
+#if defined(WITH_OPENSSL_QUIC)
+		case MQTT_SSL_VERSION_QUIC:
+			Log(TRACE_MINIMUM, -1, "Creating QUIC context");
+			net->ctx = SSL_CTX_new(OSSL_QUIC_client_thread_method());
+			break;
+#endif
+		case MQTT_SSL_VERSION_TLS_1_3:
+			Log(TRACE_MINIMUM, -1, "TLS 1.3 requires OpenSSL 1.1.1 or later");
+			break;
 		default:
 			break;
 		}
 #endif
 		if (net->ctx == NULL)
 		{
+			rc = 0;
 			if (opts->struct_version >= 3)
 				SSLSocket_error("SSL_CTX_new", NULL, net->socket, rc, opts->ssl_error_cb, opts->ssl_error_context);
 			else
@@ -715,6 +761,22 @@ int SSLSocket_setSocketForSSL(networkHandles* net, MQTTClient_SSLOptions* opts,
 
 	FUNC_ENTRY;
 
+#if defined(WITH_OPENSSL_QUIC)
+	/* A QUIC SSL_CTX cannot be used for a TLS connection and vice versa.
+	   The context survives connection attempts (SSLSocket_destroyContext is
+	   not called between them), so when failing over between quic:// and
+	   ssl:// serverURIs the stale context would be reused for the wrong
+	   transport.  Discard it when it does not match the current connection
+	   type so that a matching one is created. */
+	if (net->ctx != NULL &&
+			(SSL_CTX_get_ssl_method(net->ctx) == OSSL_QUIC_client_thread_method())
+					!= (net->quic_mode > QUIC_MODE_NONE))
+	{
+		SSL_CTX_free(net->ctx);
+		net->ctx = NULL;
+	}
+#endif
+
 	if (net->ctx != NULL || (rc = SSLSocket_createContext(net, opts)) == 1)
 	{
 		char *hostname_plus_null;
@@ -734,6 +796,37 @@ int SSLSocket_setSocketForSSL(networkHandles* net, MQTTClient_SSLOptions* opts,
 			rc = PAHO_MEMORY_ERROR;
 			goto exit;
 		}
+
+#if defined(WITH_OPENSSL_QUIC)
+	if (net->quic_mode > QUIC_MODE_NONE)
+	{
+		/* ALPN is mandtory for QUIC */
+		static const unsigned char alpn[] = {4, 'm', 'q', 't', 't'};
+		if ((rc = SSL_set_alpn_protos(net->ssl, alpn, sizeof(alpn)))) {
+			/* Note: SSL_set_alpn_protos returns 1 for failure.  ALPN is
+			   mandatory for MQTT over QUIC, so fail the setup. */
+			SSLSocket_error("SSL_set_quic_alpn", net->ssl, net->socket, rc, NULL, NULL);
+			SSL_free(net->ssl);
+			net->ssl = NULL;
+			rc = 0;
+			goto exit;
+		}
+		/* QUIC SSL objects are blocking by default.  Switch to non-blocking
+		   before the first SSL_connect() so the handshake can be driven by the
+		   SSL_IN_PROGRESS state machine instead of blocking the calling thread
+		   for the whole handshake timeout. */
+		if (SSL_set_blocking_mode(net->ssl, 0) != 1)
+		{
+			SSLSocket_error("SSL_set_blocking_mode", net->ssl, net->socket, 0, NULL, NULL);
+			SSL_free(net->ssl);
+			net->ssl = NULL;
+			rc = 0;
+			goto exit;
+		}
+		// Client side QUIC
+		SSL_set_connect_state(net->ssl);
+	}
+#endif
 
 		/* Log all ciphers available to the SSL sessions (loaded in ctx) */
 		for (i = 0; ;i++)
@@ -799,6 +892,11 @@ int SSLSocket_connect(SSL* ssl, SOCKET sock, const char* hostname, int verify, i
 				Socket_addPendingWrite(sock);
 				break;
 			default:
+				/* Any other error is fatal for the connect attempt.  Return SSL_FATAL
+				   (negative) rather than the raw SSL_ERROR_* code, because callers
+				   only treat 1 as success and negative values as failure - positive
+				   codes could fall through and be mistaken for success. */
+				rc = SSL_FATAL;
 				Socket_clearPendingWrite(sock);
 				break;
 			}
@@ -884,7 +982,20 @@ int SSLSocket_getch(SSL* ssl, SOCKET socket, char* c)
 		}
 	}
 	else if (rc == 0)
-		rc = SOCKET_ERROR; 	/* The return value from recv is 0 when the peer has performed an orderly shutdown. */
+	{
+		/* Per OpenSSL, a zero SSL_read() result must be classified with
+		   SSL_get_error(): ZERO_RETURN covers orderly TLS shutdown as well as
+		   QUIC connection close and QUIC stream FIN; SYSCALL and others are
+		   fatal.  Only WANT_READ/WANT_WRITE may be retried. */
+		int err = SSLSocket_error("SSL_read - getch", ssl, socket, rc, NULL, NULL);
+		if (err == SSL_ERROR_WANT_READ || err == SSL_ERROR_WANT_WRITE)
+		{
+			rc = TCPSOCKET_INTERRUPTED;
+			SocketBuffer_interrupted(socket, 0);
+		}
+		else
+			rc = SOCKET_ERROR;
+	}
 	else if (rc == 1)
 	{
 		SocketBuffer_queueChar(socket, *c);
@@ -931,10 +1042,20 @@ char *SSLSocket_getdata(SSL* ssl, SOCKET socket, size_t bytes, size_t* actual_le
 				goto exit;
 			}
 		}
-		else if (*rc == 0) /* rc 0 means the other end closed the socket */
+		else if (*rc == 0)
 		{
-			buf = NULL;
-			goto exit;
+			/* as in SSLSocket_getch, classify a zero SSL_read() result with
+			   SSL_get_error(): only WANT_READ/WANT_WRITE may be retried;
+			   ZERO_RETURN (orderly TLS shutdown, QUIC connection close or
+			   stream FIN) and SYSCALL mean the socket is closed */
+			int err = SSLSocket_error("SSL_read - getdata", ssl, socket, *rc, NULL, NULL);
+			if (err == SSL_ERROR_WANT_READ || err == SSL_ERROR_WANT_WRITE)
+				*rc = TCPSOCKET_INTERRUPTED;
+			else
+			{
+				buf = NULL;
+				goto exit;
+			}
 		}
 		else
 			*actual_len += *rc;
@@ -1025,14 +1146,21 @@ int SSLSocket_putdatas(SSL* ssl, SOCKET socket, char* buf0, size_t buf0len, Pack
 	}
 
 	SSL_lock_mutex(&sslCoreMutex);
+#if defined(WITH_OPENSSL_QUIC)
+	/* Process QUIC timeouts / incoming ACKs before writing so WANT_READ can clear. */
+	if (ssl && SSL_is_quic(ssl))
+		SSL_handle_events(ssl);
+#endif
 	ERR_clear_error();
 	if ((rc = SSL_write(ssl, iovec.iov_base, iovec.iov_len)) == iovec.iov_len)
 		rc = TCPSOCKET_COMPLETE;
 	else
 	{
+		/* pass the exact SSL_write() result to SSL_get_error(), as required by
+		   OpenSSL; a zero write on a closed (QUIC) connection yields
+		   ZERO_RETURN/SYSCALL here, which falls through to SOCKET_ERROR below */
 		sslerror = SSLSocket_error("SSL_write", ssl, socket, rc, NULL, NULL);
-
-		if (sslerror == SSL_ERROR_WANT_WRITE)
+		if (sslerror == SSL_ERROR_WANT_WRITE || sslerror == SSL_ERROR_WANT_READ)
 		{
 			SOCKET* sockmem = (SOCKET*)malloc(sizeof(SOCKET));
 			int free = 1;
@@ -1115,6 +1243,10 @@ int SSLSocket_continueWrite(pending_writes* pw)
 	int rc = 0;
 
 	FUNC_ENTRY;
+#if defined(WITH_OPENSSL_QUIC)
+	if (pw->ssl && SSL_is_quic(pw->ssl))
+		SSL_handle_events(pw->ssl);
+#endif
 	ERR_clear_error();
 	if ((rc = SSL_write(pw->ssl, pw->iovecs[0].iov_base, pw->iovecs[0].iov_len)) == pw->iovecs[0].iov_len)
 	{
@@ -1126,7 +1258,7 @@ int SSLSocket_continueWrite(pending_writes* pw)
 	else
 	{
 		int sslerror = SSLSocket_error("SSL_write", pw->ssl, pw->socket, rc, NULL, NULL);
-		if (sslerror == SSL_ERROR_WANT_WRITE)
+		if (sslerror == SSL_ERROR_WANT_WRITE || sslerror == SSL_ERROR_WANT_READ)
 			rc = 0; /* indicate we haven't finished writing the payload yet */
 	}
 	FUNC_EXIT_RC(rc);

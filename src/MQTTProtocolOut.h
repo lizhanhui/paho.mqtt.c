@@ -35,6 +35,7 @@
 #define WS_DEFAULT_PORT 80
 #define WSS_DEFAULT_PORT 443
 #define PROXY_DEFAULT_PORT 8080
+#define QUIC_DEFAULT_PORT 14567
 
 size_t MQTTProtocol_addressPort(const char* uri, int* port, const char **topic, int default_port);
 void MQTTProtocol_reconnect(const char* ip_address, Clients* client);

@@ -661,6 +661,11 @@ typedef struct
 #define MQTT_SSL_VERSION_TLS_1_0 1
 #define MQTT_SSL_VERSION_TLS_1_1 2
 #define MQTT_SSL_VERSION_TLS_1_2 3
+#define MQTT_SSL_VERSION_TLS_1_3 4
+/** QUIC transport selector.  Defined here for header consistency with
+ * MQTTAsync.h; the synchronous MQTTClient API rejects <code>quic://</code>
+ * URIs (<code>MQTTCLIENT_BAD_PROTOCOL</code>).  Use MQTTAsync / paho-mqtt3as. */
+#define MQTT_SSL_VERSION_QUIC    5
 
 /**
 * MQTTClient_sslProperties defines the settings to establish an SSL/TLS connection using the
@@ -718,8 +723,8 @@ typedef struct
     int enableServerCertAuth;
 
     /** The SSL/TLS version to use. Specify one of MQTT_SSL_VERSION_DEFAULT (0),
-    * MQTT_SSL_VERSION_TLS_1_0 (1), MQTT_SSL_VERSION_TLS_1_1 (2) or MQTT_SSL_VERSION_TLS_1_2 (3).
-    * Only used if struct_version is >= 1.
+    * MQTT_SSL_VERSION_TLS_1_0 (1), MQTT_SSL_VERSION_TLS_1_1 (2), MQTT_SSL_VERSION_TLS_1_2 (3)
+    * or MQTT_SSL_VERSION_TLS_1_3 (4). Only used if struct_version is >= 1.
     */
     int sslVersion;
 

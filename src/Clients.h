@@ -76,6 +76,18 @@ typedef struct
 	int qos;
 } willMessages;
 
+#if defined(OPENSSL)
+enum QUIC_MODE {
+	/* QUIC is disabled */
+	QUIC_MODE_NONE = 1,
+	/* QUIC only - there is no automatic fallback to TCP.  For fallback,
+	   configure serverURIs with a quic:// URI first and an ssl:// or
+	   tcp:// URI second. */
+	QUIC_MODE_ONLY
+};
+typedef enum QUIC_MODE QUIC_MODE;
+#endif
+
 typedef struct
 {
 	SOCKET socket;
@@ -87,6 +99,9 @@ typedef struct
 	SSL_CTX* ctx;
 	char *https_proxy;
 	char *https_proxy_auth;
+#endif
+#if defined(WITH_OPENSSL_QUIC)
+	QUIC_MODE quic_mode;
 #endif
 	char *http_proxy;
 	char *http_proxy_auth;
