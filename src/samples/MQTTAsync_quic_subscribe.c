@@ -201,17 +201,17 @@ int main(int argc, char* argv[])
 		rc = EXIT_FAILURE;
 		goto destroy_exit;
 	}
- 	while (!disc_finished)
- 	{
+	while (!disc_finished)
+	{
 		#if defined(_WIN32)
 			Sleep(100);
 		#else
 			usleep(10000L);
 		#endif
- 	}
+	}
 
 destroy_exit:
 	MQTTAsync_destroy(&client);
 exit:
- 	return rc;
+	return rc;
 }

@@ -3,3 +3,18 @@ directory (the CMake configure step does this automatically when
 PAHO_WITH_QUIC is enabled and the certificates are missing).
 
 Do not commit the generated *.pem files; they are git-ignored.
+
+Generated files:
+- cacert.pem / cakey.pem — test CA
+- cert.pem / key.pem — server certificate (CN=localhost)
+- client-cert.pem / client-key.pem — client certificate
+- untrusted-cacert.pem / untrusted-cakey.pem — second CA used by the
+  EMQX :18887 listener so the server cannot verify the test client cert
+  (test9000-2b)
+
+Broker packet-size notes for test9000-7 / test7:
+- Local EMQX (`test/emqx.conf`) sets `mqtt.max_packet_size = 100MB`, so
+  the default 5 MB payload is appropriate in CI.
+- Tencent TDMQ documents a 4 MB maximum MQTT packet.  When pointing
+  test9000 at TDMQ, pass `--size 2097152` (2 MB).  A 4–5 MB failure
+  against TDMQ is a broker limit, not a client write-path defect.

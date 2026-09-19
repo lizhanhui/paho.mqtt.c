@@ -662,6 +662,9 @@ typedef struct
 #define MQTT_SSL_VERSION_TLS_1_1 2
 #define MQTT_SSL_VERSION_TLS_1_2 3
 #define MQTT_SSL_VERSION_TLS_1_3 4
+/** QUIC transport selector.  Defined here for header consistency with
+ * MQTTAsync.h; the synchronous MQTTClient API rejects <code>quic://</code>
+ * URIs (<code>MQTTCLIENT_BAD_PROTOCOL</code>).  Use MQTTAsync / paho-mqtt3as. */
 #define MQTT_SSL_VERSION_QUIC    5
 
 /**

@@ -164,9 +164,11 @@ Status legend: [ ] open, [x] fixed
 
 Not client bugs — constraints/notes for production against TDMQ:
 
-- **Per-stream flow control is 1 MB** (`MqttServer.java:359-363`); publishes above
-  ~1 MB stall on flow-control refill. Verified to 256 KB only. Cap payloads or test
-  the real maximum. Max MQTT packet is 8 MiB.
+- **Per-stream flow control is 1 MB** (`MqttServer.java:359-363`); earlier note said
+  publishes above ~1 MB stall. **Superseded by later TDMQ live tests (2026-09-18
+  evening):** 256 KB / 1 MB / 2 MB QoS1 publishes succeeded; 4 MB and the default
+  5 MB `test7` payload failed. Treat the TDMQ limit as **max MQTT packet ≈ 4 MB**,
+  not a 1 MB stall and not an 8 MiB client-visible max. See #28.
 - **No 0-RTT** server-side — fine, client does not attempt it.
 - **No client connection migration**: server enables active migration
   (`MqttServer.java:364`) but OpenSSL QUIC client does not migrate; NAT rebinding
@@ -375,7 +377,204 @@ Review repeated at `094c84b` on 2026-09-18. These issues remain open.
 
 ### P2 — cleanup
 
-- [ ] **22. Changed lines fail `git diff --check`**
+- [x] **22. Changed lines fail `git diff --check`**
   - Trailing or mixed indentation remains in the Linux workflow,
     `src/SSLSocket.c`, and all three QUIC samples.
+  - `git diff --check 4a939dd..HEAD` (as of `260fbf3`):
+    `.github/workflows/build_linux.yml:22` (trailing space);
+    `src/SSLSocket.c:826` (trailing space);
+    `src/samples/MQTTAsync_quic_fallback.c:181`,
+    `MQTTAsync_quic_publish.c:62,208`,
+    `MQTTAsync_quic_subscribe.c:204-205,211,216` (space-before-tab).
   - Fix: remove trailing whitespace and normalize indentation before merge.
+  - **Fixed 2026-09-18**: stripped trailing space in the workflow and
+    `SSLSocket.c`; collapsed space-before-tab in the three QUIC samples.
+    Verified: `git diff --check 4a939dd..HEAD` is clean for those paths.
+
+## Follow-up review — TDMQ live tests + merge audit (`260fbf3`)
+
+Captured 2026-09-18 evening after #1–#21 were fixed. Live checks against TDMQ
+(TCP 1883 / SSL 8883 / WS 80 / WSS 443 / QUIC 14567) plus code review of
+remaining write-path, proxy, HA, and CI/test-rig gaps. Do not treat the TDMQ
+5 MB `test7` failure as a client defect — see #28.
+
+### P1 — should fix before merge
+
+- [x] **23. `SSL_ERROR_WANT_READ` from QUIC `SSL_write` is treated as fatal**
+  - `src/SSLSocket.c:1146-1176` (`SSLSocket_putdatas`)
+  - `src/SSLSocket.c:1232-1252` (`SSLSocket_continueWrite`)
+  - After #11, QUIC objects are non-blocking. OpenSSL QUIC `SSL_write()` may
+    return `SSL_ERROR_WANT_READ` (needs a packet/ACK before the write can
+    continue) as well as `SSL_ERROR_WANT_WRITE`. Both write helpers retry only
+    `WANT_WRITE`; `WANT_READ` becomes `SOCKET_ERROR` in `putdatas`, and
+    `continueWrite` leaves `rc` as the raw `SSL_write` result (typically < 0),
+    which `Socket_continueWrite` treats as a socket error.
+  - QUIC stream readiness is also independent of raw UDP `POLLOUT`. Pending
+    writes are retried from `Socket.c:1818` when the datagram socket is
+    writable, so even a correctly queued `WANT_WRITE` can spin or stall under
+    stream flow control.
+  - Why it matters: large or back-pressured publishes can fail or tear down
+    the connection. Read/connect paths already retry both WANT_* codes
+    (`SSLSocket_getch`/`getdata`, `SSLSocket_connect`).
+  - Fix: treat `WANT_READ` like `WANT_WRITE` on the write path; drive retries
+    from OpenSSL QUIC readiness/event APIs (`SSL_handle_events` /
+    `SSL_get_event_timeout` / pollability) rather than UDP `POLLOUT` alone;
+    add a forced-backpressure test. Do **not** use TDMQ 4–5 MB failures as
+    the repro — those are broker limits (#28).
+  - **Fixed 2026-09-18**: `putdatas` / `continueWrite` now retry both
+    `WANT_READ` and `WANT_WRITE`; QUIC writes call `SSL_handle_events()`
+    first. Pending SSL writes are retried even without UDP `POLLOUT`
+    (poll path also runs `continueWrites` when `write_pending` is
+    nonempty; select path also retries on readability). A dedicated
+    forced-backpressure unit test is still not added — verify with
+    2 MB QoS1 against TDMQ and 5 MB against EMQX, not 4–5 MB TDMQ.
+    Verified: QUIC smoke; test9000 #2/#8/#9/#14; test9000 #10
+    `--size 2097152` against TDMQ (9/9).
+
+- [x] **24. `httpsProxy` silently disables QUIC for `quic://`**
+  - `src/MQTTProtocolOut.c:256-285` (also `312-314` `Proxy_connect`)
+  - Socket selection is `else if (ssl && https_proxy)` **before**
+    `else if (ssl == 2)`. `ssl == 2` is truthy, so a `quic://` connect with
+    `MQTTAsync_connectOptions.httpsProxy` set, or `https_proxy` +
+    `PAHO_C_CLIENT_USE_HTTP_PROXY=TRUE`, takes `Socket_new()` to the HTTP
+    proxy and never reaches `Socket_dgram_new()`. `http_proxy` is correctly
+    skipped (`!ssl`).
+  - Why it matters: silent TCP/TLS-to-proxy misroute; connect hangs or fails
+    with a proxy/TLS error instead of a clear "QUIC does not support HTTP
+    proxies". Corporate `https_proxy` in the environment is enough to trigger
+    it when the PAHO env flag is on.
+  - Fix: reject proxies for `ssl == 2` (return a distinct error / log) unless
+    UDP/QUIC proxying is implemented; keep the QUIC dgram path first.
+  - **Fixed 2026-09-18**: `ssl == 2` is selected before the HTTPS-proxy
+    TCP path; a configured `http(s)_proxy` on a `quic://` URI logs
+    `HTTP(S) proxies are not supported for quic:// connections` and
+    returns `SOCKET_ERROR` so `serverURIs` can fall through to
+    `ssl://`. `Proxy_connect` is also skipped when `ssl == 2`.
+    Documented in README and the MQTTAsync HTTP proxy page.
+    Verified: TDMQ `quic://` + `httpsProxy=http://127.0.0.1:1/` fails
+    with the new log line (`saw_proxy_log=1`) instead of connecting.
+
+- [x] **25. `sslVersion` sticks at `MQTT_SSL_VERSION_QUIC` across `serverURIs` failover**
+  - `src/MQTTAsyncUtils.c:2957-2960`
+  - On `m->ssl == 2` the library copy `m->c->sslopts->sslVersion` is set to
+    `MQTT_SSL_VERSION_QUIC` (5). It is only refreshed from the caller's
+    options on a new `MQTTAsync_connect()` (`src/MQTTAsync.c:824-825`). A
+    later URI in the same connect (`quic://` → `ssl://`) keeps version 5.
+  - Why it matters: `SSLSocket_createContext` applies the TLS 1.3-only
+    restriction only when `sslVersion == MQTT_SSL_VERSION_TLS_1_3` (4)
+    (`src/SSLSocket.c:575-585`). Failover from a failed QUIC URI therefore
+    silently drops a TLS 1.3-only preference. Transport-flag reset (#15) and
+    ctx discard (#6) do not restore `sslVersion`.
+  - Fix: save/restore the user `sslVersion` per URI, or set QUIC version
+    only for the current attempt (e.g. stack local / restore after the
+    attempt).
+  - **Fixed 2026-09-18**: removed the `sslVersion = MQTT_SSL_VERSION_QUIC`
+    mutation. QUIC context creation is driven by `net.quic_mode`; the
+    assignment was redundant on OpenSSL 3.2+ and the only effect was
+    losing a TLS 1.3-only preference after failover.
+    Verified: test9000 #14 HA (test2e) still 95/95 against TDMQ.
+
+### P2 — cleanup / test-rig
+
+- [x] **26. CI EMQX container does not publish UDP 18887**
+  - `.github/workflows/build_linux.yml:65-68`
+  - `test/emqx.conf:86-100` (`listeners.quic.mtls_nocert` binds `:18887`)
+  - `test/test5.c:201-202` (`--quic` maps `nocert_mutual_auth_connection` to
+    `start_port+4` = 18887)
+  - Docker publishes `14567, 18883, 18884, 18885, 18886/udp` only. `test9000-2b`
+    (test_no 3) and `test9000-2c` (test_no 4) target 18887. Host-side tests
+    cannot reach the listener; negative cert tests can pass because the port
+    is unreachable rather than because TLS failed as intended.
+  - #20 added the EMQX listener but not the workflow port map.
+  - Fix: add `-p 18887:18887/udp`. Re-check 2b/2c after #27.
+  - **Fixed 2026-09-18**: workflow now publishes `-p 18887:18887/udp`.
+    2b/2c still need the untrusted-CA listener from #27.
+
+- [x] **27. EMQX `:18887` listener does not match `test2b` expectations**
+  - `test/emqx.conf:88-100` vs original `test/tls-testing/mosquitto.conf`
+  - `test/test5.c:932-1010` (`test2b` expects `test2bOnConnectFailure`)
+  - Mosquitto `:18887` served a MITM cert the client CA does not trust, so
+    the handshake failed. EMQX `mtls_nocert` serves the **same valid**
+    server cert as the other listeners with `verify_peer`. If 18887 is
+    reachable (#26) and the client presents a cert + trusts the CA,
+    `test2bOnConnect` fires and the assert `"Connect should not succeed"`
+    fails.
+  - Fix: serve an untrusted/MITM cert on `:18887` (mirror mosquitto), or
+    skip/rename `test9000-2b` for the EMQX rig and document that it needs
+    the mosquitto tls-testing layout.
+  - **Fixed 2026-09-18**: `gen.sh` now also emits `untrusted-cacert.pem`;
+    `:18887` still presents the trusted server cert but verifies clients
+    against that second CA, so test2b's valid client cert is rejected
+    (matches "server does not have client cert"). test2c still fails
+    because it omits `trustStore`. CMake regenerates certs when the
+    untrusted CA is missing.
+
+- [x] **28. `test9000` #10 / `test7` 5 MB payload vs broker packet limits**
+  - `test/test5.c:102` default `options.size = 5000000`
+  - `test/CMakeLists.txt:1331-1334` (`test9000-7-big-messages`, no `--size`)
+  - `test/emqx.conf:106-108` (`mqtt.max_packet_size = 100MB` for local EMQX)
+  - Live TDMQ (2026-09-18): `--size 262144`, `1048576`, `2097152` passed;
+    `--size 4194304` and `4000000` and the default 5 MB failed (`onFailure`
+    after ~5s). Tencent TDMQ documents a **4 MB maximum MQTT packet**.
+  - **This is a broker limit, not a confirmed client write-path defect.**
+    Do not close #23 from TDMQ 4–5 MB failures. The earlier server-side note
+    ("1 MB flow-control stall / verified to 256 KB / 8 MiB max") is outdated
+    for TDMQ.
+  - CI Linux QUIC `ctest` has failed (run 35338698350, exit 8) but the job
+    log was not retrieved, so that failure is **not** attributed to this
+    4 MB cap: CI talks to local EMQX (100 MB). If `test9000-7` fails in CI,
+    look at EMQX readiness (#30), write backpressure (#23), or a different
+    case in the same `ctest` run.
+  - Fix: keep ~5 MB against EMQX; cap or override `--size` (e.g. 2 MB) when
+    targeting TDMQ; document broker limits in the test README. Re-run
+    `ctest -R test9000-7` on the EMQX CI rig to confirm the Linux failure
+    independently.
+  - **Fixed 2026-09-18** (docs / test-rig only): CI still uses the default
+    5 MB payload against EMQX (100 MB). Documented the TDMQ 4 MB cap and
+    `--size 2097152` override in `test/ssl/emqx/etc/certs/README`,
+    README (`MQTT_QUIC_HOSTNAME`), and a CMake comment on
+    `test9000-7-big-messages`. Not a client code change.
+
+- [x] **29. QUIC `SSL*` leak on ALPN / blocking-mode setup failure**
+  - `src/SSLSocket.c:790-820`
+  - `SSL_new` succeeds, then ALPN or `SSL_set_blocking_mode` failure
+    `goto exit` without `SSL_free(net->ssl)`. A later
+    `SSLSocket_setSocketForSSL` overwrites `net->ssl` at line 790.
+  - Rare (hardcoded `mqtt` ALPN), but a real leak / stale-pointer on the
+    error path.
+  - Fix: `SSL_free(net->ssl); net->ssl = NULL;` before those `goto exit`s
+    (or a shared cleanup label).
+  - **Fixed 2026-09-18**: ALPN and `SSL_set_blocking_mode` failure paths
+    now `SSL_free(net->ssl); net->ssl = NULL;` before `goto exit`.
+
+- [x] **30. CI EMQX has no readiness probe, cleanup, or unique container name**
+  - `.github/workflows/build_linux.yml:61-83`
+  - `docker run --name emqx` with no wait for `emqx ctl status` (or listener
+    bind); cleanup is `killall python3` only — the container is never
+    stopped/removed. A previous failed job leaves `emqx` and the next
+    `docker run` fails; a fast runner can start `ctest` before QUIC
+    listeners exist.
+  - Fix: `docker rm -f emqx || true` before run; poll readiness; `docker
+    rm -f emqx` in cleanup. Optionally `FIXTURES`/`DEPENDS` so `test9000`
+    does not race the broker.
+  - **Fixed 2026-09-18**: `docker rm -f emqx` before run and in
+    `if: always()` cleanup; poll `docker exec emqx emqx ctl status` up
+    to ~60s. Container name stays `emqx` (unique per job after the
+    pre-rm). CTest `FIXTURES`/`DEPENDS` left as a later optional
+    hardening.
+
+- [x] **31. Sync `MQTTClient` exposes QUIC constants but rejects `quic://`**
+  - `src/MQTTClient.h` defines `MQTT_SSL_VERSION_QUIC`; `src/MQTTClient.c`
+    create-time scheme check has no `URI_QUIC` (returns
+    `MQTTCLIENT_BAD_PROTOCOL`).
+  - Why it matters: API/ABI docs imply parity; only `MQTTAsync` can use
+    QUIC. Not a crash.
+  - Fix: document the async-only limitation next to the constant, or add
+    `quic://` to the sync client in a later change.
+  - **Fixed 2026-09-18** (docs): comment on `MQTT_SSL_VERSION_QUIC` in
+    `MQTTClient.h` states the sync API rejects `quic://` and that
+    MQTTAsync / paho-mqtt3as is required. README already documented
+    the async-only limitation. Sync QUIC support is a later feature,
+    not done here.
+    Verified: `MQTTClient_create("quic://...")` returns
+    `MQTTCLIENT_BAD_PROTOCOL` (-14).

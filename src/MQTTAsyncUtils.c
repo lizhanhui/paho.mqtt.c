@@ -2946,7 +2946,7 @@ static int MQTTAsync_connecting(MQTTAsyncs* m)
 			size_t hostname_len;
 			int setSocketForSSLrc = 0;
 
-			if (m->c->net.https_proxy) {
+			if (m->c->net.https_proxy && m->ssl != 2) {
 				m->c->connect_state = PROXY_CONNECT_IN_PROGRESS;
 				if ((rc = Proxy_connect( &m->c->net, 1, serverURI)) == SOCKET_ERROR )
 					goto exit;
@@ -2954,10 +2954,10 @@ static int MQTTAsync_connecting(MQTTAsyncs* m)
 
 			hostname_len = MQTTProtocol_addressPort(serverURI, &port, NULL, default_port);
 
-			if (m->ssl == 2)
-			{
-				m->c->sslopts->sslVersion = MQTT_SSL_VERSION_QUIC;
-			}
+			/* Do not overwrite the caller's sslVersion with MQTT_SSL_VERSION_QUIC.
+			   QUIC context selection is driven by net.quic_mode; mutating
+			   sslVersion here would stick across serverURIs failover and drop
+			   a TLS 1.3-only preference on a later ssl:// URI. */
 			setSocketForSSLrc = SSLSocket_setSocketForSSL(&m->c->net, m->c->sslopts,
 					serverURI, hostname_len);
 

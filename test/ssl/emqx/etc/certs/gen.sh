@@ -8,11 +8,17 @@ DAYS_CA=3650
 DAYS_LEAF=825
 
 rm -f cacert.pem cakey.pem cert.pem key.pem client-cert.pem client-key.pem \
-      server.csr client.csr cacert.srl ext.cnf
+      untrusted-cacert.pem untrusted-cakey.pem \
+      server.csr client.csr cacert.srl untrusted-cacert.srl ext.cnf
 
 # CA
 openssl req -x509 -newkey rsa:2048 -nodes -days $DAYS_CA \
     -subj "/CN=Paho QUIC Test CA" -keyout cakey.pem -out cacert.pem
+
+# Second CA used by the :18887 listener so the server cannot verify the
+# client certificate (test2b: "server does not have client cert").
+openssl req -x509 -newkey rsa:2048 -nodes -days $DAYS_CA \
+    -subj "/CN=Paho QUIC Untrusted CA" -keyout untrusted-cakey.pem -out untrusted-cacert.pem
 
 printf "subjectAltName=DNS:localhost,IP:127.0.0.1\n" > ext.cnf
 
@@ -26,7 +32,7 @@ openssl req -newkey rsa:2048 -nodes -subj "/CN=localhost" -keyout client-key.pem
 openssl x509 -req -in client.csr -CA cacert.pem -CAkey cakey.pem -CAcreateserial \
     -days $DAYS_LEAF -extfile ext.cnf -out client-cert.pem
 
-rm -f server.csr client.csr cacert.srl ext.cnf
+rm -f server.csr client.csr cacert.srl untrusted-cacert.srl ext.cnf
 
 echo "Generated QUIC test certificates in $(pwd):"
 openssl x509 -in cert.pem -noout -subject -enddate

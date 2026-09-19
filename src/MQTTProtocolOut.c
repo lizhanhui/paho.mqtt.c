@@ -253,6 +253,25 @@ int MQTTProtocol_connect(const char* address, Clients* aClient, int unixsock, in
 		rc = Socket_new(aClient->net.http_proxy, addr_len, port, &(aClient->net.socket));
 #endif
 	}
+#if defined(OPENSSL) && defined(WITH_OPENSSL_QUIC)
+	else if (ssl == 2) {
+		/* HTTP(S) proxies are TCP CONNECT tunnels; they cannot carry QUIC/UDP.
+		   Fail this URI so serverURIs can fall through to ssl:// / tcp://. */
+		if (aClient->net.https_proxy || aClient->net.http_proxy)
+		{
+			Log(LOG_ERROR, -1, "HTTP(S) proxies are not supported for quic:// connections");
+			rc = SOCKET_ERROR;
+			goto exit;
+		}
+		addr_len = MQTTProtocol_addressPort(address, &port, NULL, QUIC_DEFAULT_PORT);
+		aClient->net.quic_mode = QUIC_MODE_ONLY;
+#if defined(__GNUC__) && defined(__linux__)
+		rc = Socket_dgram_new(address, addr_len, port, &(aClient->net.socket), timeout);
+#else
+		rc = Socket_dgram_new(address, addr_len, port, &(aClient->net.socket));
+#endif
+	}
+#endif
 #if defined(OPENSSL)
 	else if (ssl && aClient->net.https_proxy) {
 		addr_len = MQTTProtocol_addressPort(aClient->net.https_proxy, &port, NULL, PROXY_DEFAULT_PORT);
@@ -270,18 +289,6 @@ int MQTTProtocol_connect(const char* address, Clients* aClient, int unixsock, in
 	else if (unixsock) {
 		addr_len = strlen(address);
 		rc = Socket_unix_new(address, addr_len, &(aClient->net.socket));
-	}
-#endif
-
-#if defined(OPENSSL) && defined(WITH_OPENSSL_QUIC)
-	else if (ssl == 2) {
-		addr_len = MQTTProtocol_addressPort(address, &port, NULL, QUIC_DEFAULT_PORT);
-		aClient->net.quic_mode = QUIC_MODE_ONLY;
-#if defined(__GNUC__) && defined(__linux__)
-		rc = Socket_dgram_new(address, addr_len, port, &(aClient->net.socket), timeout);
-#else
-		rc = Socket_dgram_new(address, addr_len, port, &(aClient->net.socket));
-#endif
 	}
 #endif
 	else {
@@ -309,7 +316,7 @@ int MQTTProtocol_connect(const char* address, Clients* aClient, int unixsock, in
 #if defined(OPENSSL)
 		if (ssl)
 		{
-			if (aClient->net.https_proxy) {
+			if (aClient->net.https_proxy && ssl != 2) {
 				aClient->connect_state = PROXY_CONNECT_IN_PROGRESS;
 				rc = Proxy_connect( &aClient->net, 1, address);
 			}

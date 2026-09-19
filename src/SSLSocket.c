@@ -806,6 +806,8 @@ int SSLSocket_setSocketForSSL(networkHandles* net, MQTTClient_SSLOptions* opts,
 			/* Note: SSL_set_alpn_protos returns 1 for failure.  ALPN is
 			   mandatory for MQTT over QUIC, so fail the setup. */
 			SSLSocket_error("SSL_set_quic_alpn", net->ssl, net->socket, rc, NULL, NULL);
+			SSL_free(net->ssl);
+			net->ssl = NULL;
 			rc = 0;
 			goto exit;
 		}
@@ -816,6 +818,8 @@ int SSLSocket_setSocketForSSL(networkHandles* net, MQTTClient_SSLOptions* opts,
 		if (SSL_set_blocking_mode(net->ssl, 0) != 1)
 		{
 			SSLSocket_error("SSL_set_blocking_mode", net->ssl, net->socket, 0, NULL, NULL);
+			SSL_free(net->ssl);
+			net->ssl = NULL;
 			rc = 0;
 			goto exit;
 		}
@@ -823,7 +827,7 @@ int SSLSocket_setSocketForSSL(networkHandles* net, MQTTClient_SSLOptions* opts,
 		SSL_set_connect_state(net->ssl);
 	}
 #endif
-		
+
 		/* Log all ciphers available to the SSL sessions (loaded in ctx) */
 		for (i = 0; ;i++)
 		{
@@ -1142,6 +1146,11 @@ int SSLSocket_putdatas(SSL* ssl, SOCKET socket, char* buf0, size_t buf0len, Pack
 	}
 
 	SSL_lock_mutex(&sslCoreMutex);
+#if defined(WITH_OPENSSL_QUIC)
+	/* Process QUIC timeouts / incoming ACKs before writing so WANT_READ can clear. */
+	if (ssl && SSL_is_quic(ssl))
+		SSL_handle_events(ssl);
+#endif
 	ERR_clear_error();
 	if ((rc = SSL_write(ssl, iovec.iov_base, iovec.iov_len)) == iovec.iov_len)
 		rc = TCPSOCKET_COMPLETE;
@@ -1151,7 +1160,7 @@ int SSLSocket_putdatas(SSL* ssl, SOCKET socket, char* buf0, size_t buf0len, Pack
 		   OpenSSL; a zero write on a closed (QUIC) connection yields
 		   ZERO_RETURN/SYSCALL here, which falls through to SOCKET_ERROR below */
 		sslerror = SSLSocket_error("SSL_write", ssl, socket, rc, NULL, NULL);
-		if (sslerror == SSL_ERROR_WANT_WRITE)
+		if (sslerror == SSL_ERROR_WANT_WRITE || sslerror == SSL_ERROR_WANT_READ)
 		{
 			SOCKET* sockmem = (SOCKET*)malloc(sizeof(SOCKET));
 			int free = 1;
@@ -1234,6 +1243,10 @@ int SSLSocket_continueWrite(pending_writes* pw)
 	int rc = 0;
 
 	FUNC_ENTRY;
+#if defined(WITH_OPENSSL_QUIC)
+	if (pw->ssl && SSL_is_quic(pw->ssl))
+		SSL_handle_events(pw->ssl);
+#endif
 	ERR_clear_error();
 	if ((rc = SSL_write(pw->ssl, pw->iovecs[0].iov_base, pw->iovecs[0].iov_len)) == pw->iovecs[0].iov_len)
 	{
@@ -1245,7 +1258,7 @@ int SSLSocket_continueWrite(pending_writes* pw)
 	else
 	{
 		int sslerror = SSLSocket_error("SSL_write", pw->ssl, pw->socket, rc, NULL, NULL);
-		if (sslerror == SSL_ERROR_WANT_WRITE)
+		if (sslerror == SSL_ERROR_WANT_WRITE || sslerror == SSL_ERROR_WANT_READ)
 			rc = 0; /* indicate we haven't finished writing the payload yet */
 	}
 	FUNC_EXIT_RC(rc);

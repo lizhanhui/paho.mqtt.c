@@ -81,6 +81,7 @@ The "quic://" schema specifies MQTT over QUIC, which is always secured with TLS 
 - **Default stream mode** — all MQTT traffic uses a single client-initiated bidirectional stream (OpenSSL default stream mode), which matches MQTT's requirement for one ordered byte stream per connection. Multi-stream mode is not used.
 - **Default port** — a `quic://` URI without an explicit port defaults to 14567 (the port used by EMQX and Tencent TDMQ for MQTT over QUIC).
 - **No automatic TCP fallback** — if UDP is blocked (common on corporate networks), a `quic://` connection attempt fails by timeout rather than falling back to TCP. For fallback, configure `serverURIs` with a `quic://` URI first and an `ssl://` (or `tcp://`) URI second; the client tries them in order, e.g. `{"quic://broker:14567", "ssl://broker:8883"}`.
+- **No HTTP(S) proxies** — `httpProxy` / `httpsProxy` and the `http_proxy` / `https_proxy` environment variables are TCP CONNECT tunnels and cannot carry QUIC. A `quic://` attempt with a proxy configured fails that URI (so `serverURIs` can fall through to `ssl://`) instead of silently connecting to the proxy.
 - **Server certificate verification** — as with SSL/TLS connections, `ssl_options` should be supplied in the connect options (e.g. `trustStore` and `enableServerCertAuth` to verify the broker certificate).
 
 ## Runtime tracing
@@ -209,7 +210,7 @@ MQTT_TEST_BROKER | tcp://localhost:1883 | MQTT connection URL for a broker to us
 MQTT_TEST_PROXY | tcp://localhost:1883 | Hostname of the test proxy to use
 MQTT_SSL_HOSTNAME | localhost | Hostname of a test SSL MQTT broker to use
 MQTT_QUIC_TEST_BROKER | quic://localhost:18885 | MQTT connection URL for a QUIC-enabled broker to use during test execution
-MQTT_QUIC_HOSTNAME | localhost | Hostname of a test QUIC MQTT broker to use
+MQTT_QUIC_HOSTNAME | localhost | Hostname of a test QUIC MQTT broker to use. test9000-7 uses a 5 MB payload (EMQX allows 100 MB). Against TDMQ (4 MB packet cap) run test9000 with `--size 2097152`.
 PAHO_BUILD_DEB_PACKAGE | FALSE | Build debian package
 
 Using these variables CMake can be used to generate your Ninja or Make files. Using CMake, building out-of-source is the default. Therefore it is recommended to invoke all build commands inside your chosen build directory but outside of the source tree.

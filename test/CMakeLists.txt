@@ -1260,7 +1260,7 @@ ENDIF()
 
 IF (PAHO_QUIC_ENABLED)
 	# QUIC test certificates are generated on demand (never committed)
-	IF (NOT EXISTS ${EMQX_CERTDIR}/cacert.pem)
+	IF (NOT EXISTS ${EMQX_CERTDIR}/cacert.pem OR NOT EXISTS ${EMQX_CERTDIR}/untrusted-cacert.pem)
 		message(STATUS "Generating QUIC test certificates with ${EMQX_CERTDIR}/gen.sh")
 		execute_process(
 			COMMAND sh gen.sh
@@ -1328,6 +1328,10 @@ IF (PAHO_QUIC_ENABLED)
 			COMMAND test9000 "--test_no" "9" "--quic" "--hostname" ${MQTT_QUIC_HOSTNAME} "--client_key"	 "${EMQX_CERTDIR}/client-cert.pem" "--server_key" "${EMQX_CERTDIR}/cacert.pem" "--client_private_key" "${EMQX_CERTDIR}/client-key.pem"
 		)
 
+		# Default payload is 5 MB (test5.c).  Local EMQX allows 100 MB
+		# (test/emqx.conf).  Against TDMQ (4 MB MQTT packet cap) override
+		# with --size 2097152; do not treat a 4–5 MB TDMQ failure as a
+		# client defect.
 		ADD_TEST(
 			NAME test9000-7-big-messages
 			COMMAND test9000 "--test_no" "10" "--quic" "--hostname" ${MQTT_QUIC_HOSTNAME} "--client_key"	 "${EMQX_CERTDIR}/client-cert.pem" "--server_key" "${EMQX_CERTDIR}/cacert.pem" "--client_private_key" "${EMQX_CERTDIR}/client-key.pem"

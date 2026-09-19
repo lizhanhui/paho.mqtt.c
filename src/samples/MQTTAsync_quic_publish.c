@@ -59,7 +59,7 @@ void connlost(void *context, char *cause)
 	if ((rc = MQTTAsync_connect(client, &conn_opts)) != MQTTASYNC_SUCCESS)
 	{
 		printf("Failed to start connect, return code %d\n", rc);
- 		finished = 1;
+		finished = 1;
 	}
 }
 
@@ -205,5 +205,5 @@ int main(int argc, char* argv[])
 
 	printf("Destroy client\n");
 	MQTTAsync_destroy(&client);
- 	return rc;
+	return rc;
 }

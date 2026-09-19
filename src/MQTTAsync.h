@@ -2393,6 +2393,11 @@ exit:
   * http_proxy or https_proxy (lower case only) environment variables are used, for plain
   * TCP and TLS-secured connections respectively.
   *
+  * HTTP(S) proxies are not supported for <code>quic://</code> connections.  A
+  * QUIC URI attempted while a proxy is configured fails so that
+  * <code>serverURIs</code> can fall through to <code>ssl://</code> or
+  * <code>tcp://</code>.
+  *
   * The no_proxy environment variable can be used to exclude certain hosts from using an
   * environment variable chosen proxy. This does not apply to a proxy selected through the API.
   * The no_proxy environment variable is lower case only, and is a list of comma-separated

@@ -805,9 +805,12 @@ SOCKET Socket_getReadySocket(int more_work, int timeout, mutex_type mutex, int* 
 			goto exit; /* no work to do */
 		}
 
-		/* Check pending write set for writeable sockets */
+		/* Check pending write set for writeable sockets.  Also retry when
+		   writes are already queued: QUIC SSL_write can return WANT_READ,
+		   which is independent of UDP POLLOUT. */
 		rc1 = poll(mod_s.saved.fds_write, mod_s.saved.nfds, 0);
-		if (rc1 > 0 && Socket_continueWrites(&sock, mutex) == SOCKET_ERROR)
+		if ((rc1 > 0 || (mod_s.write_pending && mod_s.write_pending->count > 0)) &&
+				Socket_continueWrites(&sock, mutex) == SOCKET_ERROR)
 		{
 			*rc = SOCKET_ERROR;
 			goto exit;
@@ -1807,15 +1810,36 @@ int Socket_continueWrites(SOCKET* sock, mutex_type mutex)
 		int socket = *(int*)(curpending->content);
 		int rc = 0;
 #if defined(USE_SELECT)
-
-		if (FD_ISSET(socket, pwset) && ((rc = Socket_continueWrite(socket)) != 0))
+		int ready = FD_ISSET(socket, pwset);
+#if defined(OPENSSL)
+		/* QUIC writes can stall on WANT_READ; retry when the socket is readable too */
+		if (!ready)
+			ready = FD_ISSET(socket, &(mod_s.rset));
+#endif
+		if (ready && ((rc = Socket_continueWrite(socket)) != 0))
 #else
 		struct pollfd* fd;
+		int ready = 0;
 
 		/* find the socket in the fds structure */
-		fd = bsearch(&socket, mod_s.saved.fds_write, (size_t)mod_s.saved.nfds, sizeof(mod_s.saved.fds_write[0]), cmpsockfds);
-
-		if ((fd->revents & POLLOUT) && ((rc = Socket_continueWrite(socket)) != 0))
+		if (mod_s.saved.fds_write)
+			fd = bsearch(&socket, mod_s.saved.fds_write, (size_t)mod_s.saved.nfds, sizeof(mod_s.saved.fds_write[0]), cmpsockfds);
+		else
+			fd = NULL;
+		if (fd)
+			ready = (fd->revents & POLLOUT) != 0;
+#if defined(OPENSSL)
+		/* Stream flow control is independent of datagram POLLOUT.  Retry any
+		   queued SSL write so WANT_READ can be cleared by SSL_handle_events /
+		   SSL_write. */
+		if (!ready)
+		{
+			pending_writes* pw = SocketBuffer_getWrite(socket);
+			if (pw && pw->ssl)
+				ready = 1;
+		}
+#endif
+		if (ready && ((rc = Socket_continueWrite(socket)) != 0))
 #endif
 		{
 			if (!SocketBuffer_writeComplete(socket))

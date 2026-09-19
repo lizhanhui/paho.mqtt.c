@@ -178,5 +178,5 @@ int main(int argc, char* argv[])
 		#endif
 
 	MQTTAsync_destroy(&client);
- 	return rc;
+	return rc;
 }
