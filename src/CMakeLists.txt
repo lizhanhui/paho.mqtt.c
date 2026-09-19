@@ -243,15 +243,51 @@ if(PAHO_WITH_SSL OR PAHO_WITH_LIBRESSL)
       message(WARNING "PAHO_WITH_QUIC requires OpenSSL >= 3.2; LibreSSL does not support QUIC - QUIC support disabled")
     endif()
   else()
-    find_package(OpenSSL REQUIRED)
+    if (PAHO_OPENSSL_SOURCE STREQUAL "fetch")
+      include(PahoOpenSSLFetch)
 
-    if (PAHO_WITH_QUIC AND NOT "${OPENSSL_VERSION}" VERSION_LESS "3.2")
-      set(COMPILE_WITH_QUIC "WITH_OPENSSL_QUIC=1")
-      set(PAHO_QUIC_ENABLED TRUE)
+      ## The fetched library does not exist until build time, so the probe below
+      ## cannot run. We pick the OpenSSL version ourselves, so gate on that.
+      if (PAHO_WITH_QUIC AND NOT "${PAHO_OPENSSL_FETCH_VERSION}" VERSION_LESS "3.2")
+        set(COMPILE_WITH_QUIC "WITH_OPENSSL_QUIC=1")
+        set(PAHO_QUIC_ENABLED TRUE)
+      else()
+        set(COMPILE_WITH_QUIC "")
+        if (PAHO_WITH_QUIC)
+          message(WARNING "PAHO_WITH_QUIC requires OpenSSL >= 3.2 (fetching ${PAHO_OPENSSL_FETCH_VERSION}) - QUIC support disabled. Set PAHO_OPENSSL_FETCH_VERSION to 3.2 or later.")
+        endif()
+      endif()
     else()
-      set(COMPILE_WITH_QUIC "")
+      find_package(OpenSSL REQUIRED)
+
+      ## QUIC is an optional component of OpenSSL: it can be excluded when OpenSSL
+      ## itself is built (no-quic), so the version number alone does not tell us
+      ## whether the QUIC API is present. Probe the library we are about to link
+      ## against. The result is not cached, so switching OPENSSL_ROOT_DIR to
+      ## another OpenSSL re-runs the check.
       if (PAHO_WITH_QUIC)
-        message(WARNING "PAHO_WITH_QUIC requires OpenSSL >= 3.2 (found ${OPENSSL_VERSION}) - QUIC support disabled")
+        include(CheckCSourceCompiles)
+        set(CMAKE_REQUIRED_LIBRARIES OpenSSL::SSL OpenSSL::Crypto)
+        unset(PAHO_HAVE_OPENSSL_QUIC_API CACHE)
+        check_c_source_compiles("
+          #include <openssl/ssl.h>
+          int main(void) { return OSSL_QUIC_client_thread_method() == 0; }
+          " PAHO_HAVE_OPENSSL_QUIC_API)
+        unset(CMAKE_REQUIRED_LIBRARIES)
+      endif()
+
+      if (PAHO_WITH_QUIC AND PAHO_HAVE_OPENSSL_QUIC_API)
+        set(COMPILE_WITH_QUIC "WITH_OPENSSL_QUIC=1")
+        set(PAHO_QUIC_ENABLED TRUE)
+      else()
+        set(COMPILE_WITH_QUIC "")
+        if (PAHO_WITH_QUIC)
+          if ("${OPENSSL_VERSION}" VERSION_LESS "3.2")
+            message(WARNING "PAHO_WITH_QUIC requires OpenSSL >= 3.2 (found ${OPENSSL_VERSION} at ${OPENSSL_SSL_LIBRARY}) - QUIC support disabled. Set OPENSSL_ROOT_DIR to a QUIC-capable OpenSSL, or PAHO_OPENSSL_SOURCE=fetch.")
+          else()
+            message(WARNING "PAHO_WITH_QUIC requires an OpenSSL built with QUIC support: ${OPENSSL_VERSION} at ${OPENSSL_SSL_LIBRARY} does not provide OSSL_QUIC_client_thread_method() - QUIC support disabled. Set OPENSSL_ROOT_DIR to a QUIC-capable OpenSSL, or PAHO_OPENSSL_SOURCE=fetch.")
+          endif()
+        endif()
       endif()
     endif()
 
@@ -267,6 +303,11 @@ if(PAHO_WITH_SSL OR PAHO_WITH_LIBRESSL)
     ## Note: SSL libraries must be recompiled due to ifdefs
     add_library(common_ssl_obj OBJECT ${common_src})
     target_include_directories(common_ssl_obj PUBLIC ${SSL_INCLUDE_DIR})
+
+    if (PAHO_OPENSSL_FETCH_TARGET)
+      ## The fetched headers only exist after openssl_fetch has run.
+      add_dependencies(common_ssl_obj ${PAHO_OPENSSL_FETCH_TARGET})
+    endif()
 
     set_property(TARGET common_ssl_obj PROPERTY POSITION_INDEPENDENT_CODE ON)
     target_compile_definitions(common_ssl_obj PRIVATE OPENSSL=1 ${COMPILE_WITH_QUIC} PAHO_MQTT_EXPORTS=1)
@@ -320,6 +361,9 @@ if(PAHO_WITH_SSL OR PAHO_WITH_LIBRESSL)
         PUBLIC
           ${SSL_LIBRARY_NAME}::SSL ${SSL_LIBRARY_NAME}::Crypto ${LIBS_SYSTEM}
       )
+      if (PAHO_OPENSSL_FETCH_TARGET)
+        add_dependencies(${TARGET} ${PAHO_OPENSSL_FETCH_TARGET})
+      endif()
     endforeach()
 
     install(TARGETS paho-mqtt3cs paho-mqtt3as
@@ -335,6 +379,11 @@ if(PAHO_WITH_SSL OR PAHO_WITH_LIBRESSL)
     ## Note: SSL libraries must be recompiled due ifdefs
     add_library(common_ssl_obj_static OBJECT ${common_src})
     target_include_directories(common_ssl_obj_static PUBLIC ${SSL_INCLUDE_DIR})
+
+    if (PAHO_OPENSSL_FETCH_TARGET)
+      ## The fetched headers only exist after openssl_fetch has run.
+      add_dependencies(common_ssl_obj_static ${PAHO_OPENSSL_FETCH_TARGET})
+    endif()
 
     set_property(TARGET common_ssl_obj_static PROPERTY POSITION_INDEPENDENT_CODE ON)
     target_compile_definitions(common_ssl_obj_static PRIVATE OPENSSL=1 ${COMPILE_WITH_QUIC} PAHO_MQTT_STATIC=1)
@@ -408,6 +457,9 @@ if(PAHO_WITH_SSL OR PAHO_WITH_LIBRESSL)
         PUBLIC
           ${SSL_LIBRARY_NAME}::SSL ${SSL_LIBRARY_NAME}::Crypto ${LIBS_SYSTEM}
       )
+      if (PAHO_OPENSSL_FETCH_TARGET)
+        add_dependencies(${TARGET} ${PAHO_OPENSSL_FETCH_TARGET})
+      endif()
     endforeach()
   endif()
 endif()

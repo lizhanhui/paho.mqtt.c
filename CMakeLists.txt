@@ -56,6 +56,30 @@ option(PAHO_WITH_SSL "Flag that defines whether to build ssl-enabled binaries to
 option(PAHO_WITH_LIBRESSL "Flag that defines whether to build ssl-enabled binaries with LibreSSL instead of OpenSSL. " FALSE)
 option(PAHO_WITH_QUIC "Flag that defines whether to build ssl-enabled binaries with QUIC support. " FALSE)
 option(PAHO_WITH_LIBUUID "Flag that defines whether libuuid or a custom uuid implementation should be used" FALSE)
+
+## Where OpenSSL comes from: the one installed on the system, or a source build
+## downloaded and compiled by the build itself. Use 'fetch' when the system
+## OpenSSL cannot support QUIC (older than 3.2, or built with no-quic).
+## An OpenSSL LTS line: supported upstream until 2030-04-08, whereas a non-LTS
+## line such as 3.4 gets about two years. A fetched OpenSSL is not patched by
+## the OS, so this version is what the built libraries are stuck with.
+set(PAHO_OPENSSL_FETCH_VERSION_DEFAULT "3.5.8")
+## SHA256 of openssl-3.5.8.tar.gz, as published with the OpenSSL release assets.
+set(PAHO_OPENSSL_FETCH_HASH_DEFAULT "a8f84a39918ec6415ce765d9b429d313ba97b8143169c172e734b9514464f5b2")
+
+set(PAHO_OPENSSL_SOURCE "system" CACHE STRING "Where to get OpenSSL from: 'system' (find_package) or 'fetch' (download and build from source)")
+set_property(CACHE PAHO_OPENSSL_SOURCE PROPERTY STRINGS system fetch)
+set(PAHO_OPENSSL_FETCH_VERSION "${PAHO_OPENSSL_FETCH_VERSION_DEFAULT}" CACHE STRING "OpenSSL version to build when PAHO_OPENSSL_SOURCE=fetch")
+set(PAHO_OPENSSL_FETCH_HASH "${PAHO_OPENSSL_FETCH_HASH_DEFAULT}" CACHE STRING "SHA256 of the OpenSSL source tarball built when PAHO_OPENSSL_SOURCE=fetch")
+
+if(NOT PAHO_OPENSSL_SOURCE STREQUAL "system" AND NOT PAHO_OPENSSL_SOURCE STREQUAL "fetch")
+  message(FATAL_ERROR "PAHO_OPENSSL_SOURCE must be 'system' or 'fetch' (got '${PAHO_OPENSSL_SOURCE}')")
+endif()
+
+if(PAHO_WITH_LIBRESSL AND NOT PAHO_OPENSSL_SOURCE STREQUAL "system")
+  message(FATAL_ERROR "PAHO_OPENSSL_SOURCE=fetch builds OpenSSL; it cannot be combined with PAHO_WITH_LIBRESSL")
+endif()
+
 option(PAHO_BUILD_SHARED "Build shared library" TRUE)
 option(PAHO_BUILD_STATIC "Build static library" FALSE)
 option(PAHO_BUILD_DOCUMENTATION "Create and install the HTML based API documentation (requires Doxygen)" FALSE)

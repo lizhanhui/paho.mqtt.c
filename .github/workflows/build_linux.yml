@@ -26,16 +26,6 @@ jobs:
           sudo apt-get update
           sudo apt-get install doxygen
 
-      - name: Install openssl3.4
-        if: matrix.ssl
-        run: |
-          pwd
-          mkdir -p openssl_root
-          wget https://github.com/openssl/openssl/releases/download/openssl-3.4.1/openssl-3.4.1.tar.gz &&
-            tar zxvf openssl-3.4.1.tar.gz --strip-components=1 -C openssl_root
-          cd openssl_root
-          ./Configure && make -j `nproc`
-
       - name: Build
         run: |
           rm -rf build.paho
@@ -46,7 +36,7 @@ jobs:
                 -DPAHO_BUILD_SHARED=TRUE \
                 -DCMAKE_BUILD_TYPE=Debug \
                 -DPAHO_WITH_SSL=TRUE \
-                ${{ matrix.ssl && '-DOPENSSL_ROOT_DIR=../openssl_root' || '' }} \
+                ${{ matrix.ssl && '-DPAHO_OPENSSL_SOURCE=fetch' || '' }} \
                 -DPAHO_BUILD_DOCUMENTATION=FALSE \
                 -DPAHO_BUILD_SAMPLES=TRUE \
                 -DPAHO_HIGH_PERFORMANCE=TRUE \
