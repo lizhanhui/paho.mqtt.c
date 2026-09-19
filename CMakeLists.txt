@@ -60,9 +60,12 @@ option(PAHO_WITH_LIBUUID "Flag that defines whether libuuid or a custom uuid imp
 ## Where OpenSSL comes from: the one installed on the system, or a source build
 ## downloaded and compiled by the build itself. Use 'fetch' when the system
 ## OpenSSL cannot support QUIC (older than 3.2, or built with no-quic).
-set(PAHO_OPENSSL_FETCH_VERSION_DEFAULT "3.4.1")
-## SHA256 of openssl-3.4.1.tar.gz, as published with the OpenSSL release assets.
-set(PAHO_OPENSSL_FETCH_HASH_DEFAULT "002a2d6b30b58bf4bea46c43bdd96365aaf8daa6c428782aa4feee06da197df3")
+## An OpenSSL LTS line: supported upstream until 2030-04-08, whereas a non-LTS
+## line such as 3.4 gets about two years. A fetched OpenSSL is not patched by
+## the OS, so this version is what the built libraries are stuck with.
+set(PAHO_OPENSSL_FETCH_VERSION_DEFAULT "3.5.8")
+## SHA256 of openssl-3.5.8.tar.gz, as published with the OpenSSL release assets.
+set(PAHO_OPENSSL_FETCH_HASH_DEFAULT "a8f84a39918ec6415ce765d9b429d313ba97b8143169c172e734b9514464f5b2")
 
 set(PAHO_OPENSSL_SOURCE "system" CACHE STRING "Where to get OpenSSL from: 'system' (find_package) or 'fetch' (download and build from source)")
 set_property(CACHE PAHO_OPENSSL_SOURCE PROPERTY STRINGS system fetch)

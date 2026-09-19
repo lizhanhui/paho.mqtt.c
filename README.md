@@ -204,8 +204,8 @@ LIBRESSL_ROOT_DIR | "" (system default) | Directory containing your LibreSSL ins
 PAHO_WITH_UNIX_SOCKETS | FALSE | (*nix systems only) Flag to enable support for UNIX-domain sockets
 PAHO_WITH_QUIC | FALSE | Flag that defines whether to build QUIC support into the ssl-enabled binaries (requires `PAHO_WITH_SSL=TRUE` and an OpenSSL built with QUIC support, i.e. OpenSSL 3.2 or later that provides `OSSL_QUIC_client_thread_method` — detected by probing the library, not by version). Enables `quic://` URIs in the MQTTAsync library.
 PAHO_OPENSSL_SOURCE | system | Where OpenSSL comes from. `system` uses the installed OpenSSL (`find_package`); `fetch` downloads and builds OpenSSL from source, for when the installed one has no QUIC support. See [Building OpenSSL from source](#building-openssl-from-source).
-PAHO_OPENSSL_FETCH_VERSION | 3.4.1 | OpenSSL version to build when `PAHO_OPENSSL_SOURCE=fetch`. Must be 3.2 or later for QUIC.
-PAHO_OPENSSL_FETCH_HASH | SHA256 of `openssl-3.4.1.tar.gz` | SHA256 of the source tarball. Must be updated together with `PAHO_OPENSSL_FETCH_VERSION`, otherwise the configure step fails.
+PAHO_OPENSSL_FETCH_VERSION | 3.5.8 | OpenSSL version to build when `PAHO_OPENSSL_SOURCE=fetch`. Must be 3.2 or later for QUIC. Prefer an LTS line: the OS does not patch this copy.
+PAHO_OPENSSL_FETCH_HASH | SHA256 of `openssl-3.5.8.tar.gz` | SHA256 of the source tarball. Must be updated together with `PAHO_OPENSSL_FETCH_VERSION`, otherwise the configure step fails.
 PAHO_BUILD_DOCUMENTATION | FALSE | Create and install the HTML based API documentation (requires Doxygen)
 PAHO_BUILD_SAMPLES | FALSE | Build sample programs
 PAHO_ENABLE_TESTING | TRUE | Build test and run
@@ -254,10 +254,19 @@ $ cmake -DPAHO_WITH_SSL=TRUE -DPAHO_WITH_QUIC=TRUE -DPAHO_OPENSSL_SOURCE=fetch .
 
 This downloads `openssl-<PAHO_OPENSSL_FETCH_VERSION>.tar.gz`, checks it against `PAHO_OPENSSL_FETCH_HASH`, builds it statically (requires `perl` and GNU `make` on the `PATH`), and links it into the Paho libraries. Keep in mind:
 
-- **It is opt-in.** The default, `PAHO_OPENSSL_SOURCE=system`, keeps using the system OpenSSL, so its security updates continue to apply. A fetched OpenSSL is only as current as `PAHO_OPENSSL_FETCH_VERSION`, and only for as long as this build is re-run.
+- **It is opt-in.** The default, `PAHO_OPENSSL_SOURCE=system`, keeps using the system OpenSSL, so there is one TLS stack in the process and the OS keeps patching it.
+- **Two copies of OpenSSL in one process.** The fetched OpenSSL is linked statically into the Paho libraries, so an application that also uses the system OpenSSL runs two independent copies side by side. Their global state does not match or compose:
+  - An `ex_data` index (`SSL_get_ex_new_index`) is only meaningful in the copy that issued it. Paho registers one for its own use; the application's indices are unrelated.
+  - Provider and FIPS configuration is per copy: enabling FIPS in one does nothing for the other, so "this process is in FIPS mode" is no longer true.
+  - Each copy loads its own `openssl.cnf`, so `MinProtocol`, `CipherString` and the security level can differ. The fetched copy has none, and falls back to compiled-in defaults — hardening applied to the system OpenSSL does not reach it.
+  - Error queues are per copy, so `ERR_error_string` in the application can misrender a code produced by Paho's copy.
+  - Initialization, cleanup, `atfork` handlers, RAND/DRBG state and lock tables are all duplicated.
+  - OpenSSL objects must be released by the copy that created them. Paho's public API never hands out `SSL*` or `SSL_CTX*` (it takes `trustStore`/`keyStore` paths), so this cannot happen through Paho, but it applies to any other library in the process.
+  - The fetched OpenSSL is built with `-fvisibility=hidden`, so its symbols stay local to the Paho libraries. Paho therefore always calls its own copy, rather than the linker binding its `SSL_*` calls to whichever OpenSSL the application loaded — but that only removes the accidental mixing, not the duplication.
+  - Use `PAHO_BUILD_STATIC=TRUE` with `PAHO_BUILD_SHARED=FALSE` to avoid shipping a shared library that carries a TLS stack, and prefer `PAHO_OPENSSL_SOURCE=system` altogether whenever the system OpenSSL can support QUIC.
+- **The OS will not patch it.** The fetched OpenSSL is compiled into the Paho libraries, so a distro security update to `libssl` does nothing for it: it stays at `PAHO_OPENSSL_FETCH_VERSION` until someone bumps the version, updates `PAHO_OPENSSL_FETCH_HASH`, and rebuilds. It is also invisible to dependency scanning — `ldd`/`otool` show no `libssl` — so an SBOM built from dynamic dependencies will miss it. The default is an OpenSSL LTS line, supported upstream until 2030-04-08; non-LTS lines such as 3.4 get roughly two years. Check the [OpenSSL release strategy](https://openssl-library.org/policies/releasestrat/) before pinning a different one.
 - **Version and hash move together.** Raising `PAHO_OPENSSL_FETCH_VERSION` without updating `PAHO_OPENSSL_FETCH_HASH` fails at configure time rather than downloading an unverified tarball. The published checksums are listed with the [OpenSSL release assets](https://github.com/openssl/openssl/releases).
 - **Certificate verification needs configuring.** The OpenSSL built here looks for its CA bundle under the build tree, which contains none, so server certificate verification fails unless `ssl_options.trustStore` (or `SSL_CERT_FILE`) is set.
-- **Prefer a static Paho build.** The default build produces shared libraries that would each carry their own copy of OpenSSL, and a process that also loads the system OpenSSL ends up with two copies of it. Use `PAHO_BUILD_STATIC=TRUE` with `PAHO_BUILD_SHARED=FALSE` unless you specifically need the shared libraries.
 - **Windows is not supported** with the Visual Studio generators, which would need `perl`, NASM and an MSVC command prompt. Install a QUIC-capable OpenSSL there and point `OPENSSL_ROOT_DIR` at it.
 
 ### Debug builds
