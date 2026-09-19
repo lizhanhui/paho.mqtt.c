@@ -1182,6 +1182,7 @@ int test2d(struct Options options)
 	char* test_topic = "C client test2d";
 	int count = 0;
 	unsigned int iteration = 0;
+	unsigned int max_iterations = 20;
 
 	failures = 0;
 	MyLog(
@@ -1194,7 +1195,12 @@ int test2d(struct Options options)
 	// there is/was some race condition, which caused _sometimes_ that the library failed to detect,
 	// that the connect attempt has already failed.
 	// Therefore we need to test this several times!
-	for (iteration = 0; !failures && (iteration < 20) ; iteration++)
+	// EMQX QUIC does not implement fail_if_no_peer_cert, so a missing client
+	// cert hangs the handshake instead of failing it. Bound connectTimeout
+	// so onFailure fires inside the wait loop (default 30s > TEST2D_COUNT).
+	if (options.quic)
+		max_iterations = 3;
+	for (iteration = 0; !failures && (iteration < max_iterations) ; iteration++)
 	{
 		count = 0;
 		MQTTAsync_setTraceLevel(MQTTASYNC_TRACE_ERROR);
@@ -1212,6 +1218,7 @@ int test2d(struct Options options)
 
 		opts.keepAliveInterval = 60;
 		opts.cleansession = 1;
+		opts.connectTimeout = 5;
 
 		opts.will = &wopts;
 		opts.will->message = "will message";
@@ -1238,7 +1245,7 @@ int test2d(struct Options options)
 			MQTTAsync_destroy(&c);
 			break;
 		}
-#define TEST2D_COUNT 1000
+#define TEST2D_COUNT 1500
 		while (!test2dFinished && ++count < TEST2D_COUNT)
 		{
 #if defined(_WIN32)

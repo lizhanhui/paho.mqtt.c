@@ -1303,6 +1303,8 @@ IF (PAHO_QUIC_ENABLED)
 			COMMAND test9000 "--test_no" "4" "--quic" "--hostname" ${MQTT_QUIC_HOSTNAME} "--client_key"	 "${EMQX_CERTDIR}/client-cert.pem" "--server_key" "${EMQX_CERTDIR}/cacert.pem" "--client_private_key" "${EMQX_CERTDIR}/client-key.pem"
 		)
 
+		# EMQX QUIC cannot reject a missing client cert (no
+		# fail_if_no_peer_cert). test2d uses a 5s connectTimeout.
 		ADD_TEST(
 			NAME test9000-2d-mutual-ssl-auth-client-missing-client-cert
 			COMMAND test9000 "--test_no" "5" "--quic" "--hostname" ${MQTT_QUIC_HOSTNAME} "--client_key"	 "${EMQX_CERTDIR}/client-cert.pem" "--server_key" "${EMQX_CERTDIR}/cacert.pem" "--client_private_key" "${EMQX_CERTDIR}/client-key.pem"
