@@ -324,6 +324,16 @@ void MyLog(int LOGA_level, char* format, ...)
 	fflush(stdout);
 }
 
+static void logFailureData(const char* where, MQTTAsync_failureData* response)
+{
+	if (response)
+		MyLog(LOGA_INFO, "%s: code=%d message=%s",
+			where, response->code,
+			response->message ? response->message : "(null)");
+	else
+		MyLog(LOGA_INFO, "%s: no failure data", where);
+}
+
 
 #if defined(_WIN32) || defined(_WINDOWS)
 #define mqsleep(A) Sleep(1000*A)
@@ -713,6 +723,7 @@ int test1OnFailureCalled = 0;
 
 void test1OnFailure(void* context, MQTTAsync_failureData* response)
 {
+	logFailureData("test1OnFailure", response);
 	MyLog(LOGA_DEBUG, "In connect onFailure callback, context %p", context);
 
 	test1OnFailureCalled++;
@@ -814,6 +825,7 @@ int test1(struct Options options)
 void test2aOnConnectFailure(void* context, MQTTAsync_failureData* response)
 {
 	AsyncTestClient* client = (AsyncTestClient*) context;
+	logFailureData("test2aOnConnectFailure", response);
 	MyLog(LOGA_DEBUG, "In test2aOnConnectFailure callback, %s",
 			client->clientid);
 
@@ -937,6 +949,7 @@ int test2bFinished;
 
 void test2bOnConnectFailure(void* context, MQTTAsync_failureData* response)
 {
+	logFailureData("test2bOnConnectFailure", response);
 	MyLog(LOGA_DEBUG, "In test2bOnConnectFailure callback, context %p", context);
 
 	assert("This test should call test2bOnConnectFailure. ", 1, "test2bOnConnectFailure callback was called\n", 1);
@@ -1037,6 +1050,7 @@ int test2cFinished;
 
 void test2cOnConnectFailure(void* context, MQTTAsync_failureData* response)
 {
+	logFailureData("test2cOnConnectFailure", response);
 	MyLog(LOGA_DEBUG, "In test2cOnConnectFailure callback, context %p", context);
 
 	assert("This test should call test2cOnConnectFailure. ", 1, "test2cOnConnectFailure callback was called\n", 0);
@@ -1141,6 +1155,7 @@ int test2dFinished;
 
 void test2dOnConnectFailure(void* context, MQTTAsync_failureData* response)
 {
+	logFailureData("test2dOnConnectFailure", response);
 	MyLog(LOGA_DEBUG, "In test2dOnConnectFailure callback, context %p", context);
 
 	assert("This test should call test2dOnConnectFailure. ", 1, "test2dOnConnectFailure callback was called\n", 0);
@@ -1254,6 +1269,7 @@ int test2d(struct Options options)
 void test2eOnConnectFailure(void* context, MQTTAsync_failureData* response)
 {
 	AsyncTestClient* client = (AsyncTestClient*) context;
+	logFailureData("test2eOnConnectFailure", response);
 	MyLog(LOGA_DEBUG, "In test2eOnConnectFailure callback, %s",
 			client->clientid);
 
@@ -1378,6 +1394,7 @@ int test2e(struct Options options)
 void test3aOnConnectFailure(void* context, MQTTAsync_failureData* response)
 {
 	AsyncTestClient* client = (AsyncTestClient*) context;
+	logFailureData("test3aOnConnectFailure", response);
 	MyLog(LOGA_DEBUG, "In test3aOnConnectFailure callback, context %p", context);
 
 	assert("There should be no failures in this test. ", 0, "test3aOnConnectFailure callback was called\n", 0);
@@ -1506,6 +1523,7 @@ int test3bFinished;
 
 void test3bOnConnectFailure(void* context, MQTTAsync_failureData* response)
 {
+	logFailureData("test3bOnConnectFailure", response);
 	MyLog(LOGA_DEBUG, "In test3bOnConnectFailure callback, context %p", context);
 
 	assert("This test should call test3bOnConnectFailure. ", 1, "test3bOnConnectFailure callback was called\n", 1);
@@ -1598,6 +1616,7 @@ int test3b(struct Options options)
 void test4OnConnectFailure(void* context, MQTTAsync_failureData* response)
 {
 	AsyncTestClient* client = (AsyncTestClient*) context;
+	logFailureData("test4OnConnectFailure", response);
 	MyLog(LOGA_DEBUG, "In test4OnConnectFailure callback, context %p", context);
 
 	assert("There should be no failures in this test. ", 0, "test4OnConnectFailure callback was called\n", 0);
@@ -1711,6 +1730,7 @@ int test4(struct Options options)
 void test5aOnConnectFailure(void* context, MQTTAsync_failureData* response)
 {
 	AsyncTestClient* client = (AsyncTestClient*) context;
+	logFailureData("test5aOnConnectFailure", response);
 	MyLog(LOGA_DEBUG, "In test5aOnConnectFailure callback, context %p", context);
 
 	assert("There should be no failures in this test. ", 0, "test5aOnConnectFailure callback was called\n", 0);
@@ -1847,6 +1867,7 @@ int test5a(struct Options options)
 void test5bOnConnectFailure(void* context, MQTTAsync_failureData* response)
 {
 	AsyncTestClient* client = (AsyncTestClient*) context;
+	logFailureData("test5bOnConnectFailure", response);
 	MyLog(LOGA_DEBUG, "In test5bOnConnectFailure callback, context %p", context);
 
 	assert("There should be no failures in this test. ", 0, "test5bOnConnectFailure callback was called\n", 0);
@@ -1981,6 +2002,7 @@ int test5cFinished;
 
 void test5cOnConnectFailure(void* context, MQTTAsync_failureData* response)
 {
+	logFailureData("test5cOnConnectFailure", response);
 	MyLog(LOGA_DEBUG, "In test5cOnConnectFailure callback, context %p", context);
 
 	assert("This test should call test5cOnConnectFailure. ", 1, "test5cOnConnectFailure callback was called\n", 1);
@@ -2071,6 +2093,7 @@ exit:
 void test6OnConnectFailure(void* context, MQTTAsync_failureData* response)
 {
 	AsyncTestClient* client = (AsyncTestClient*) context;
+	logFailureData("test6OnConnectFailure", response);
 	MyLog(LOGA_DEBUG, "In test6OnConnectFailure callback, context %p", context);
 
 	assert("There should be no failures in this test. ", 0, "test6OnConnectFailure callback was called\n", 0);
@@ -2197,6 +2220,7 @@ int test7_payloadlen = 0;
 void test7OnConnectFailure(void* context, MQTTAsync_failureData* response)
 {
 	AsyncTestClient* client = (AsyncTestClient*) context;
+	logFailureData("test7OnConnectFailure", response);
 	MyLog(LOGA_DEBUG, "In test7OnConnectFailure callback, %s", client->clientid);
 
 	assert("There should be no failures in this test. ", 0, "test7OnConnectFailure callback was called\n", 0);
@@ -2575,6 +2599,7 @@ exit:
 void test9OnConnectFailure(void* context, MQTTAsync_failureData* response)
 {
 	AsyncTestClient* client = (AsyncTestClient*) context;
+	logFailureData("test9OnConnectFailure", response);
 	MyLog(LOGA_DEBUG, "In test9OnConnectFailure callback, %s",
 			client->clientid);
 
@@ -2689,6 +2714,7 @@ int test10Finished;
 void test10OnConnectFailure(void* context, MQTTAsync_failureData* response)
 {
 	AsyncTestClient* client = (AsyncTestClient*) context;
+	logFailureData("test10OnConnectFailure", response);
 	MyLog(LOGA_DEBUG, "In test10OnConnectFailure callback, %s",
 			client->clientid);
 
