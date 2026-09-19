@@ -74,7 +74,7 @@ The use of Unix-domain sockets requires the build option of `PAHO_WITH_UNIX_SOCK
 
 The "quic://" schema specifies MQTT over QUIC, which is always secured with TLS (QUIC does not allow unencrypted connections). Requirements and characteristics:
 
-- **OpenSSL 3.2 or later** — QUIC support is implemented using the OpenSSL QUIC API (`OSSL_QUIC_client_thread_method`), which first appeared in OpenSSL 3.2 (see the [OpenSSL QUIC documentation](https://docs.openssl.org/3.6/man7/openssl-quic/)). LibreSSL and OpenSSL 1.x do not support QUIC.
+- **OpenSSL 3.2 or later, built with QUIC** — QUIC support is implemented using the OpenSSL QUIC API (`OSSL_QUIC_client_thread_method`), which first appeared in OpenSSL 3.2 (see the [OpenSSL QUIC documentation](https://docs.openssl.org/3.6/man7/openssl-quic/)). LibreSSL and OpenSSL 1.x do not support QUIC. QUIC is an optional component of OpenSSL, so a 3.2 or later install can still lack it (for example when OpenSSL was configured with `no-quic`). The build therefore probes for `OSSL_QUIC_client_thread_method()` in the OpenSSL it links against rather than trusting the version number; if the probe fails, QUIC is disabled with a warning. Many distributions still ship OpenSSL 3.0. If the OpenSSL found on your system has no QUIC support, point CMake at one that does — for example `-DOPENSSL_ROOT_DIR=$(brew --prefix openssl@3.6)` on macOS, or the install prefix of a locally built OpenSSL on Linux.
 - **Build options** — the library must be built with both `PAHO_WITH_SSL=TRUE` and `PAHO_WITH_QUIC=TRUE`.
 - **MQTTAsync only** — QUIC connections are supported by the asynchronous library (`paho-mqtt3as`, MQTTAsync API). The synchronous MQTTClient library does not support `quic://` URIs.
 - **ALPN** — the client negotiates the `mqtt` ALPN protocol, as required for MQTT over QUIC.
@@ -198,11 +198,11 @@ PAHO_BUILD_SHARED | TRUE | Build a shared version of the libraries
 PAHO_BUILD_STATIC | FALSE | Build a static version of the libraries
 PAHO_HIGH_PERFORMANCE | FALSE | When set to true, the debugging aids internal tracing and heap tracking are not included.
 PAHO_WITH_SSL | FALSE | Flag that defines whether to build ssl-enabled binaries too.
-OPENSSL_ROOT_DIR | "" (system default) | Directory containing your OpenSSL installation (i.e. `/usr/local` when headers are in `/usr/local/include` and libraries are in `/usr/local/lib`)
+OPENSSL_ROOT_DIR | "" (system default) | Directory containing your OpenSSL installation (i.e. `/usr/local` when headers are in `/usr/local/include` and libraries are in `/usr/local/lib`). Use this to select a particular OpenSSL, such as a QUIC-capable one when the system OpenSSL has no QUIC support.
 PAHO_WITH_LIBRESSL | FALSE | Flag that defines whether to build ssl-enabled binaries with LibreSSL instead of OpenSSL.  
 LIBRESSL_ROOT_DIR | "" (system default) | Directory containing your LibreSSL installation (i.e. `/usr/local` when headers are in `/usr/local/include` and libraries are in `/usr/local/lib`)
 PAHO_WITH_UNIX_SOCKETS | FALSE | (*nix systems only) Flag to enable support for UNIX-domain sockets
-PAHO_WITH_QUIC | FALSE | Flag that defines whether to build QUIC support into the ssl-enabled binaries (requires `PAHO_WITH_SSL=TRUE` and OpenSSL with QUIC support, i.e. OpenSSL 3.2 or later). Enables `quic://` URIs in the MQTTAsync library.
+PAHO_WITH_QUIC | FALSE | Flag that defines whether to build QUIC support into the ssl-enabled binaries (requires `PAHO_WITH_SSL=TRUE` and an OpenSSL built with QUIC support, i.e. OpenSSL 3.2 or later that provides `OSSL_QUIC_client_thread_method` — detected by probing the library, not by version). Enables `quic://` URIs in the MQTTAsync library.
 PAHO_BUILD_DOCUMENTATION | FALSE | Create and install the HTML based API documentation (requires Doxygen)
 PAHO_BUILD_SAMPLES | FALSE | Build sample programs
 PAHO_ENABLE_TESTING | TRUE | Build test and run

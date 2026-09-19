@@ -245,13 +245,33 @@ if(PAHO_WITH_SSL OR PAHO_WITH_LIBRESSL)
   else()
     find_package(OpenSSL REQUIRED)
 
-    if (PAHO_WITH_QUIC AND NOT "${OPENSSL_VERSION}" VERSION_LESS "3.2")
+    ## QUIC is an optional component of OpenSSL: it can be excluded when OpenSSL
+    ## itself is built (no-quic), so the version number alone does not tell us
+    ## whether the QUIC API is present. Probe the library we are about to link
+    ## against. The result is not cached, so switching OPENSSL_ROOT_DIR to
+    ## another OpenSSL re-runs the check.
+    if (PAHO_WITH_QUIC)
+      include(CheckCSourceCompiles)
+      set(CMAKE_REQUIRED_LIBRARIES OpenSSL::SSL OpenSSL::Crypto)
+      unset(PAHO_HAVE_OPENSSL_QUIC_API CACHE)
+      check_c_source_compiles("
+        #include <openssl/ssl.h>
+        int main(void) { return OSSL_QUIC_client_thread_method() == 0; }
+        " PAHO_HAVE_OPENSSL_QUIC_API)
+      unset(CMAKE_REQUIRED_LIBRARIES)
+    endif()
+
+    if (PAHO_WITH_QUIC AND PAHO_HAVE_OPENSSL_QUIC_API)
       set(COMPILE_WITH_QUIC "WITH_OPENSSL_QUIC=1")
       set(PAHO_QUIC_ENABLED TRUE)
     else()
       set(COMPILE_WITH_QUIC "")
       if (PAHO_WITH_QUIC)
-        message(WARNING "PAHO_WITH_QUIC requires OpenSSL >= 3.2 (found ${OPENSSL_VERSION}) - QUIC support disabled")
+        if ("${OPENSSL_VERSION}" VERSION_LESS "3.2")
+          message(WARNING "PAHO_WITH_QUIC requires OpenSSL >= 3.2 (found ${OPENSSL_VERSION} at ${OPENSSL_SSL_LIBRARY}) - QUIC support disabled. Set OPENSSL_ROOT_DIR to a QUIC-capable OpenSSL.")
+        else()
+          message(WARNING "PAHO_WITH_QUIC requires an OpenSSL built with QUIC support: ${OPENSSL_VERSION} at ${OPENSSL_SSL_LIBRARY} does not provide OSSL_QUIC_client_thread_method() - QUIC support disabled. Set OPENSSL_ROOT_DIR to a QUIC-capable OpenSSL.")
+        endif()
       endif()
     endif()
 
