@@ -5,6 +5,7 @@ jobs:
   build:
     runs-on: ubuntu-latest
     strategy:
+      fail-fast: false
       matrix:
         # with/without openssl source
         ssl: [true, false]
@@ -64,11 +65,12 @@ jobs:
         run: |
           sh test/ssl/emqx/etc/certs/gen.sh
           docker rm -f emqx || true
-          # Hostname and EMQX_NODE_NAME must match. Do not set node.name in
-          # test/emqx.conf — a mismatch (emqx@127.0.0.1 vs container id)
-          # makes the official image exit with nodistribution.
-          docker run -d --name emqx --hostname emqx \
-          -e EMQX_NODE_NAME=emqx@emqx \
+          # Use 127.0.0.1 so `emqx ctl` can ping the node. A hostname-based
+          # name (emqx@emqx) starts the broker but ctl never gets a pong, and
+          # a conf-vs-entrypoint name mismatch exits with nodistribution.
+          # Do not set node.name in test/emqx.conf; env wins.
+          docker run -d --name emqx \
+          -e EMQX_NODE_NAME=emqx@127.0.0.1 \
           -e EMQX_NODE__COOKIE=emqxsecretcookie \
           -e EMQX_NODE__DATA_DIR=data \
           -v `pwd`/test/ssl/emqx/etc/certs:/opt/emqx/etc/certs \
@@ -77,6 +79,13 @@ jobs:
           emqx/emqx:5.8.4
           ready=0
           for i in $(seq 1 45); do
+            # ctl needs Erlang distribution; the boot line is enough to know
+            # the QUIC listeners are up (seen when ctl ping failed for 90s).
+            if docker logs emqx 2>&1 | grep -q "is running now"; then
+              echo "EMQX is ready"
+              ready=1
+              break
+            fi
             if docker exec emqx emqx ctl status; then
               echo "EMQX is ready"
               ready=1
