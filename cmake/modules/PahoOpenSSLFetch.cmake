@@ -79,6 +79,13 @@ endif()
 ## shared paho libraries. --libdir=lib keeps the imported paths below
 ## predictable: some platforms default to lib64. OpenSSL builds QUIC unless it
 ## is configured with no-quic, so there is nothing extra to enable for QUIC.
+##
+## Hidden visibility keeps OpenSSL out of the paho libraries' dynamic symbol
+## table (2454 exported symbols without it). Exported, they would let the
+## dynamic linker resolve paho's SSL_* calls against a different OpenSSL the
+## application happens to load, and they would pollute the global namespace.
+## Hidden symbols in a static archive become local to the library that links
+## them, so paho keeps calling the OpenSSL it was built against.
 ExternalProject_Add(openssl_fetch
   URL "https://github.com/openssl/openssl/releases/download/openssl-${PAHO_OPENSSL_FETCH_VERSION}/openssl-${PAHO_OPENSSL_FETCH_VERSION}.tar.gz"
   URL_HASH "SHA256=${PAHO_OPENSSL_FETCH_HASH}"
@@ -90,7 +97,7 @@ ExternalProject_Add(openssl_fetch
       "--prefix=${PAHO_OPENSSL_INSTALL_DIR}"
       "--openssldir=${PAHO_OPENSSL_INSTALL_DIR}/ssl"
       "--libdir=lib"
-      no-shared no-tests no-docs -fPIC
+      no-shared no-tests no-docs -fPIC -fvisibility=hidden
   BUILD_COMMAND "${PAHO_OPENSSL_MAKE}" "-j${PAHO_OPENSSL_JOBS}"
   INSTALL_COMMAND "${PAHO_OPENSSL_MAKE}" install_sw
   BUILD_BYPRODUCTS
